@@ -1,0 +1,51 @@
+# 🔥 Dependencias
+node_modules/
+
+# 🔥 Next.js
+.next/
+out/
+
+# 🔥 Build
+build/
+dist/
+
+# 🔐 Variables de entorno (MUY IMPORTANTE)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 🧪 Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 🖥️ Sistema
+.DS_Store
+Thumbs.db
+
+# 🧠 IDE / Editor
+.vscode/
+.idea/
+
+# 🚀 Vercel
+.vercel
+
+# 📦 Archivos comprimidos
+*.zip
+
+# 🧾 TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# 🧹 Cache
+.cache/
+
+# 📂 Subidas locales (si guardas archivos en tu app)
+uploads/
+public/uploads/
+
+# 🔥 Supabase local (si usas CLI)
+.supabase/
