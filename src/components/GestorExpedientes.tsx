@@ -167,36 +167,65 @@ export const GestorExpedientes: React.FC = () => {
     setGuardando(false);
   };
 
-  // ── Subir documento ──────────────────────────────────────────────
+  // ── Subir documento → Cloudinary ────────────────────────────────
+  const CLOUDINARY_CLOUD = 'dcbftuglo';
+  const CLOUDINARY_PRESET = 'fundamiga_docs';
+
   const handleSubirDocumento = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !expedienteSeleccionado) return;
     setSubiendoDoc(true);
-    const ext = file.name.split('.').pop();
-    const path = `${expedienteSeleccionado.id}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage.from('expedientes').upload(path, file);
-    if (uploadError) { setError('Error al subir: ' + uploadError.message); setSubiendoDoc(false); return; }
-    const { data: urlData } = supabase.storage.from('expedientes').getPublicUrl(path);
-    const doc: Documento = {
-      id: Date.now().toString(),
-      expediente_id: expedienteSeleccionado.id,
-      nombre_archivo: file.name,
-      tipo_documento: tipoDocSeleccionado,
-      url: urlData.publicUrl,
-      storage_path: path,
-      subido_at: new Date().toISOString(),
-    };
-    const { error: dbError } = await supabase.from('documentos_expediente').insert(doc);
-    if (dbError) { setError('Error al registrar documento: ' + dbError.message); }
-    else { setDocumentos(prev => [doc, ...prev]); }
-    setSubiendoDoc(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    try {
+      // 1. Subir el archivo a Cloudinary (sin costo de almacenamiento en Supabase)
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', CLOUDINARY_PRESET);
+      formData.append('folder', `fundamiga/${expedienteSeleccionado.id}`);
+
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/auto/upload`,
+        { method: 'POST', body: formData }
+      );
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData?.error?.message || 'Error al subir a Cloudinary');
+      }
+
+      const cloudData = await res.json();
+      const publicUrl: string = cloudData.secure_url;
+      const publicId: string = cloudData.public_id;
+
+      // 2. Guardar sólo el enlace y los metadatos en Supabase (pesa casi 0 bytes)
+      const doc: Documento = {
+        id: Date.now().toString(),
+        expediente_id: expedienteSeleccionado.id,
+        nombre_archivo: file.name,
+        tipo_documento: tipoDocSeleccionado,
+        url: publicUrl,
+        storage_path: publicId, // guardamos el public_id de Cloudinary para referencia
+        subido_at: new Date().toISOString(),
+      };
+
+      const { error: dbError } = await supabase.from('documentos_expediente').insert(doc);
+      if (dbError) throw new Error('Error al registrar en base de datos: ' + dbError.message);
+
+      setDocumentos(prev => [doc, ...prev]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido al subir archivo';
+      setError(msg);
+    } finally {
+      setSubiendoDoc(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   // ── Eliminar documento ───────────────────────────────────────────
   const handleEliminarDoc = async (doc: Documento) => {
     if (!confirm(`¿Eliminar "${doc.nombre_archivo}"?`)) return;
-    await supabase.storage.from('expedientes').remove([doc.storage_path]);
+    // Eliminamos el registro de la base de datos; el archivo en Cloudinary
+    // permanece accesible pero puedes borrarlo manualmente desde el panel de Cloudinary.
     await supabase.from('documentos_expediente').delete().eq('id', doc.id);
     setDocumentos(prev => prev.filter(d => d.id !== doc.id));
   };
@@ -310,7 +339,7 @@ export const GestorExpedientes: React.FC = () => {
                         <div>
                           <p className="font-bold text-slate-800">{exp.nombre}</p>
                           <p className="text-[10px] text-slate-400 font-mono">C.C. {exp.cedula || '—'}</p>
-                        </div>
+                        </div>  
                       </div>
                     </td>
                     <td className="px-5 py-4">

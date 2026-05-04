@@ -26,26 +26,14 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
-# 🧠 IDE / Editor
-.vscode/
-.idea/
-
 # 🚀 Vercel
 .vercel
 
 # 📦 Archivos comprimidos
 *.zip
 
-# 🧾 TypeScript
+# 🧾 Tipos TS build
 *.tsbuildinfo
-next-env.d.ts
 
 # 🧹 Cache
 .cache/
-
-# 📂 Subidas locales (si guardas archivos en tu app)
-uploads/
-public/uploads/
-
-# 🔥 Supabase local (si usas CLI)
-.supabase/

@@ -10,6 +10,7 @@ import {
   UserX, Plus, ChevronDown, Calendar, Archive
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { supabaseStorage, uploadToCorrectBucket, deleteFromCorrectBucket } from '@/lib/supabaseStorage';
 import { Expediente, DocumentoExpediente, CARGOS, TIPOS_DOCUMENTO, DOCUMENTOS_ESENCIALES } from '@/types';
 
 const cargoColor: Record<string, string> = {
@@ -28,31 +29,34 @@ const cargoColor: Record<string, string> = {
 };
 
 const tipoIcono: Record<string, string> = {
-   'Hoja de Vida': '📄',
-'Cédula de Ciudadanía': '🪪',
-'Contrato': '📝',
+  'Hoja de Vida': '📄',
+  'Cédula de Ciudadanía': '🪪',
+  'Contrato': '📝',
 
-'Solicitud de Ingreso': '📑',
-'Solicitud de Retiro': '📤',
+  'Solicitud de Ingreso': '📑',
+  'Solicitud de Retiro': '📤',
 
-'Certificado EPS': '🏥',
+  
+  'Certificado EPS': '🏥',
 
-'Afiliación ARL': '🦺',
+  'Afiliación ARL': '🦺',
 
-'RUT': '🧾',
+  'RUT': '🧾',
 
-'Firma': '✍️',
+  'Firma': '✍️',
 
-// 🔥 ANTECEDENTES
-'Antecedentes Policía': '👮',
-'Antecedentes Contraloría': '📊',
-'Antecedentes Procuraduría': '⚖️',
+  // 🔥 ANTECEDENTES
+  'Antecedentes Policía': '👮',
+  'Antecedentes Contraloría': '📊',
+  'Antecedentes Procuraduría': '⚖️',
 
-// 🆕 NUEVO
-'Certificado de Cuenta': '🏦',
-
-'Otro': '📎',
+  
+  'Carta de Renuncia': '📮',
+  'Acta de Liquidación': '📋',
+  'Certificado de cuenta': '🏦',
+  'Otro': '📎',
 };
+
 
 export default function ExpedienteDetallePage() {
   const params = useParams();
@@ -87,7 +91,13 @@ export default function ExpedienteDetallePage() {
     setLoading(false);
   }, [id]);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { 
+    cargar(); 
+    // Debug para ver el nombre real del bucket en la cuenta nueva
+    supabaseStorage.storage.listBuckets().then(({data}) => {
+      console.log('Buckets disponibles en cuenta de respaldo:', data?.map(b => b.name));
+    });
+  }, [cargar]);
 
   const guardarEdicion = async () => {
     if (!formEdit.nombre?.trim()) return;
@@ -112,36 +122,68 @@ export default function ExpedienteDetallePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setSubiendo(true); setError(null);
-    const path = `${id}/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
-    const { error: uploadError } = await supabase.storage.from('expedientes').upload(path, file);
-    if (uploadError) { setError('Error al subir archivo: ' + uploadError.message); setSubiendo(false); return; }
-    const { data: urlData } = supabase.storage.from('expedientes').getPublicUrl(path);
-    const docId = Date.now().toString();
-    await supabase.from('documentos_expediente').insert({
-      id: docId, expediente_id: id, nombre_archivo: file.name,
-      tipo_documento: tipoDoc, url: urlData.publicUrl, storage_path: path,
-      fecha_vencimiento: fechaVencDoc || null,
-      notas: notaDoc.trim() || null,
-    });
-    setDocumentos(prev => [{
-      id: docId, expediente_id: id, nombre_archivo: file.name,
-      tipo_documento: tipoDoc, url: urlData.publicUrl, storage_path: path,
-      fecha_vencimiento: fechaVencDoc || undefined,
-      notas: notaDoc.trim() || undefined,
-    }, ...prev]);
-    e.target.value = '';
-    setFechaVencDoc('');
-    setNotaDoc('');
-    setSubiendo(false);
+    
+    try {
+      // 1. Subir a la NUEVA cuenta de Supabase Storage usando el helper robusto
+      const path = `${id}/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+      const { url, path: finalPath } = await uploadToCorrectBucket(path, file);
+
+      // 2. Guardar referencia en la base de datos principal de Supabase
+      const docId = Date.now().toString();
+      const newDoc = {
+        id: docId,
+        expediente_id: id,
+        nombre_archivo: file.name,
+        tipo_documento: tipoDoc,
+        url: url,
+        storage_path: finalPath,
+        fecha_vencimiento: fechaVencDoc || null,
+        notas: notaDoc.trim() || null,
+      };
+
+      const { error: dbError } = await supabase.from('documentos_expediente').insert(newDoc);
+      
+      if (dbError) throw dbError;
+
+      setDocumentos(prev => [
+        { ...newDoc, fecha_vencimiento: fechaVencDoc || undefined, notas: notaDoc.trim() || undefined },
+        ...prev
+      ]);
+
+      e.target.value = '';
+      setFechaVencDoc('');
+      setNotaDoc('');
+    } catch (err: any) {
+      console.error('Error en proceso de subida:', err);
+      setError('Error al subir documento: ' + err.message);
+    } finally {
+      setSubiendo(false);
+    }
   };
 
   const eliminarDocumento = async (doc: DocumentoExpediente) => {
     if (!confirm(`¿Eliminar "${doc.nombre_archivo}"?`)) return;
     setEliminandoDoc(doc.id);
-    await supabase.storage.from('expedientes').remove([doc.storage_path]);
-    await supabase.from('documentos_expediente').delete().eq('id', doc.id);
-    setDocumentos(prev => prev.filter(d => d.id !== doc.id));
-    setEliminandoDoc(null);
+    
+    try {
+      const isNewSupabase = doc.url.includes('gimldpldmkqvgizkczrs'); // Detectar si es la cuenta nueva
+
+      if (isNewSupabase) {
+        // Eliminar de la nueva cuenta usando el helper robusto
+        await deleteFromCorrectBucket(doc.storage_path);
+      } else {
+        // Eliminar de la cuenta vieja (principal)
+        await supabase.storage.from('expedientes').remove([doc.storage_path]);
+      }
+
+      await supabase.from('documentos_expediente').delete().eq('id', doc.id);
+      setDocumentos(prev => prev.filter(d => d.id !== doc.id));
+    } catch (err: any) {
+      console.error('Error al eliminar:', err);
+      setError('Error al eliminar: ' + err.message);
+    } finally {
+      setEliminandoDoc(null);
+    }
   };
 
   const guardarNotaDoc = async (docId: string) => {
@@ -588,7 +630,7 @@ export default function ExpedienteDetallePage() {
                 <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                   <p className="text-[10px] text-slate-400 font-bold">{documentos.length} documento{documentos.length !== 1 ? 's' : ''}</p>
                   <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Almacenados en Supabase
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Nuevos archivos almacenados en Cuenta de Respaldo
                   </p>
                 </div>
               )}

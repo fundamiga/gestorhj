@@ -26,20 +26,16 @@ export const DOCUMENTOS_ESENCIALES = [
   'Hoja de Vida',
   'Cédula de Ciudadanía',
   'Contrato',
-  'Certificado EPS',
+  'Certificado EPS', // ✅ corregido
   'Afiliación ARL',
-
-  'Antecedentes Policía',
+   'Antecedentes Policía',
   'Antecedentes Contraloría',
   'Antecedentes Procuraduría',
-
   'RUT',
   'Firma',
   'Solicitud de Ingreso',
   'Solicitud de Retiro',
-
-  // 🆕 NUEVO (si quieres que sea obligatorio)
-  'Certificado de Cuenta',
+  'Certificado de cuenta',
 ];
 
 export const TIPOS_DOCUMENTO = [
@@ -47,28 +43,28 @@ export const TIPOS_DOCUMENTO = [
   'Cédula de Ciudadanía',
   'Contrato',
 
-  'Certificado EPS',
+  
+  'Certificado EPS', // ✅ corregido
+
   'Afiliación ARL',
 
   'RUT',
   'Firma',
 
-  // 🔥 ANTECEDENTES
+  // 🔥 ANTECEDENTES (te faltaban aquí)
   'Antecedentes Policía',
   'Antecedentes Contraloría',
   'Antecedentes Procuraduría',
 
+  
   'Solicitud de Ingreso',
   'Solicitud de Retiro',
-
-  // 🆕 NUEVO
-  'Certificado de Cuenta',
-
+  'Certificado de cuenta',
   'Otro',
 ];
 
 export const CARGOS = [
   'CONTRATISTAS DE ADMINISTRACION',
   '5 - 6', '6 - 6', 'CARTON C', 'GUACANDA',
-  'TERCERA', 'ROZO', '2 - 10', 'MAYORISTA', 'GUABINAS', 'BOLIVAR','GUABINAS','REMESAS'
+  'TERCERA', 'ROZO', '2 - 10', 'MAYORISTA', 'GUABINAS', 'BOLIVAR', 'REMESAS'
 ];
