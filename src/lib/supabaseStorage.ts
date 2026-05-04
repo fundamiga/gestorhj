@@ -8,14 +8,6 @@ export const supabaseStorage = (SUPABASE_STORAGE_URL && SUPABASE_STORAGE_ANON_KE
   ? createClient(SUPABASE_STORAGE_URL, SUPABASE_STORAGE_ANON_KEY)
   : null as any;
 
-if (typeof window !== 'undefined') {
-  console.log('DIAGNÓSTICO STORAGE:', {
-    url: SUPABASE_STORAGE_URL,
-    key_start: SUPABASE_STORAGE_ANON_KEY?.substring(0, 20) + '...',
-    exists: !!supabaseStorage
-  });
-}
-
 // Helper para subir al bucket correcto probando ambas variantes
 export async function uploadToCorrectBucket(path: string, file: File): Promise<{url: string, path: string}> {
   if (!supabaseStorage) throw new Error('Configuración de almacenamiento de respaldo incompleta (faltan variables de entorno)');
@@ -24,13 +16,15 @@ export async function uploadToCorrectBucket(path: string, file: File): Promise<{
   let bucket = 'EXPEDIENTES';
   let { error } = await supabaseStorage.storage.from(bucket).upload(path, file);
   
-  if (error && error.message.includes('Bucket not found')) {
-    // Si falla, intentar con Minúsculas
-    bucket = 'expedientes';
-    const retry = await supabaseStorage.storage.from(bucket).upload(path, file);
-    if (retry.error) throw retry.error;
-  } else if (error) {
-    throw error;
+  if (error) {
+    if (error.message.includes('Bucket not found')) {
+      // Si falla, intentar con Minúsculas
+      bucket = 'expedientes';
+      const retry = await supabaseStorage.storage.from(bucket).upload(path, file);
+      if (retry.error) throw retry.error;
+    } else {
+      throw error;
+    }
   }
   
   const { data } = supabaseStorage.storage.from(bucket).getPublicUrl(path);
