@@ -8,6 +8,14 @@ export const supabaseStorage = (SUPABASE_STORAGE_URL && SUPABASE_STORAGE_ANON_KE
   ? createClient(SUPABASE_STORAGE_URL, SUPABASE_STORAGE_ANON_KEY)
   : null as any;
 
+if (typeof window !== 'undefined') {
+  console.log('DIAGNÓSTICO STORAGE:', {
+    url: SUPABASE_STORAGE_URL,
+    key_start: SUPABASE_STORAGE_ANON_KEY?.substring(0, 20) + '...',
+    exists: !!supabaseStorage
+  });
+}
+
 // Helper para subir al bucket correcto probando ambas variantes
 export async function uploadToCorrectBucket(path: string, file: File): Promise<{url: string, path: string}> {
   if (!supabaseStorage) throw new Error('Configuración de almacenamiento de respaldo incompleta (faltan variables de entorno)');
