@@ -93,10 +93,6 @@ export default function ExpedienteDetallePage() {
 
   useEffect(() => { 
     cargar(); 
-    // Debug para ver el nombre real del bucket en la cuenta nueva
-    supabaseStorage.storage.listBuckets().then(({data}) => {
-      console.log('Buckets disponibles en cuenta de respaldo:', data?.map(b => b.name));
-    });
   }, [cargar]);
 
   const guardarEdicion = async () => {
