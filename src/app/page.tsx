@@ -139,49 +139,49 @@ export default function ExpedientesPage() {
   })).filter(r => r.total > 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-emerald-100/30 blur-[120px] rounded-full -z-10 -translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-yellow-100/20 blur-[100px] rounded-full -z-10 translate-x-1/4 translate-y-1/4" />
+    <div className="min-h-screen bg-slate-50 relative overflow-hidden selection:bg-emerald-100 selection:text-emerald-900">
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-emerald-100/40 blur-[140px] rounded-full -z-10 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+      <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-yellow-100/30 blur-[120px] rounded-full -z-10 translate-x-1/4 translate-y-1/4" />
 
-      <nav className="bg-white/70 backdrop-blur-xl border-b border-gray-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <nav className="max-w-7xl mx-auto mt-6 px-6 sticky top-6 z-40">
+        <div className="glass-panel rounded-[2rem] px-8 py-4 flex items-center justify-between shadow-2xl shadow-emerald-900/5">
           <div className="flex items-center gap-4">
-            <div className="relative w-12 h-12 bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              <Image src="/LOGO.png" alt="Fundamiga Logo" fill sizes="48px" className="object-contain p-1.5" priority />
+            <div className="relative w-11 h-11 bg-white rounded-2xl shadow-inner overflow-hidden border border-slate-100 p-1.5">
+              <Image src="/LOGO.png" alt="Fundamiga Logo" fill sizes="48px" className="object-contain" priority />
             </div>
             <div>
-              <span className="text-xl font-black text-slate-800 tracking-tighter leading-none block">Fundamiga</span>
-              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.15em] mt-1.5 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />Gestión de Expedientes
+              <span className="text-xl font-black text-slate-800 tracking-tighter leading-none block premium-gradient-text">Fundamiga</span>
+              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />Portal RRHH
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => setMostrarResumen(v => !v)}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border font-bold text-xs transition-all ${mostrarResumen ? 'bg-emerald-600 text-white border-emerald-600' : 'border-gray-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-200'}`}>
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs transition-all duration-300 ${mostrarResumen ? 'bg-slate-900 text-white shadow-lg shadow-slate-200' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-100'}`}>
               <Building2 size={14} />Resumen
             </button>
-            <button onClick={cargar} className="p-2.5 rounded-xl border border-gray-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-200 transition-all" title="Recargar">
+            <button onClick={cargar} className="p-2.5 rounded-2xl bg-white border border-slate-100 text-slate-400 hover:text-emerald-600 hover:rotate-180 transition-all duration-500" title="Recargar">
               <RefreshCw size={16} />
             </button>
-            <Link href="/nuevo" className="group flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-sm transition-all shadow-sm">
-              <Plus size={16} />Nuevo Expediente
+            <Link href="/nuevo" className="group flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-2xl font-black text-xs transition-all shadow-lg shadow-emerald-200 hover:-translate-y-0.5 active:translate-y-0">
+              <Plus size={16} />Nuevo Registro
             </Link>
           </div>
         </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-10">
-        <div className="mb-10">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="h-1.5 w-12 bg-emerald-500 rounded-full" />
+        <div className="mb-12 animate-in slide-in-from-bottom-4 duration-700">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-1.5 w-12 bg-emerald-500 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
             <div className="h-1.5 w-4 bg-yellow-400 rounded-full" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tighter">
-            Expedientes de <span className="text-emerald-600">Personal</span>
+          <h1 className="text-5xl md:text-6xl font-black text-slate-900 tracking-tighter leading-tight">
+            Archivo Digital de <span className="premium-gradient-text text-emerald-600">Personal</span>
           </h1>
-          <p className="text-slate-500 font-medium mt-3 text-lg border-l-4 border-yellow-400 pl-6">
-            Archivador digital de hojas de vida y documentos del personal.
+          <p className="text-slate-500 font-medium mt-4 text-xl border-l-4 border-yellow-400 pl-8 max-w-2xl leading-relaxed">
+            Gestión eficiente y centralizada de <span className="text-slate-900 font-black">hojas de vida</span> y documentos esenciales para Fundamiga.
           </p>
         </div>
 
@@ -201,9 +201,14 @@ export default function ExpedientesPage() {
             { label: 'Retirados', value: loading ? '…' : retirados, color: 'text-rose-500' },
             { label: 'Incompletos', value: loading ? '…' : incompletos, color: incompletos > 0 ? 'text-amber-500' : 'text-slate-400' },
           ].map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
-              <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+            <div key={i} className={`group glass-panel rounded-[2rem] p-7 transition-all duration-500 hover:-translate-y-2 animate-in fade-in slide-in-from-bottom-8 stagger-${i+1}`}>
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-3 group-hover:text-emerald-600 transition-colors duration-300">{s.label}</p>
+              <div className="flex items-end justify-between">
+                <p className={`text-4xl font-black ${s.color} tracking-tighter`}>{s.value}</p>
+                <div className={`w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-500 ${s.color.replace('text-', 'bg-').replace('600', '100/20').replace('500', '100/20')}`}>
+                   {i === 0 ? <Users size={14} /> : i === 1 ? <Plus size={14} /> : i === 2 ? <X size={14} /> : <AlertCircle size={14} />}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -243,15 +248,15 @@ export default function ExpedientesPage() {
         )}
 
         {/* Tabla */}
-        <div className="bg-white rounded-[2rem] border border-gray-100 overflow-hidden shadow-sm">
+        <div className="bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white shadow-[0_20px_50px_rgba(0,0,0,0.04)] overflow-hidden">
           <div className="p-6 border-b border-gray-100 space-y-3">
             {/* Buscador */}
-            <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 border border-gray-200 focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-100 transition-all">
-              <Search size={15} className="text-slate-400 shrink-0" />
+            <div className="flex items-center gap-3 bg-white rounded-2xl px-5 py-4 border border-slate-200 focus-within:border-emerald-500 focus-within:ring-4 focus-within:ring-emerald-50 transition-all duration-300 shadow-sm">
+              <Search size={18} className="text-slate-400 shrink-0" />
               <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
                 placeholder="Buscar por nombre, cédula o cargo…"
-                className="flex-1 bg-transparent outline-none text-sm font-semibold text-slate-700 placeholder:text-slate-400" />
-              {busqueda && <button onClick={() => setBusqueda('')}><X size={14} className="text-slate-400 hover:text-red-400" /></button>}
+                className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" />
+              {busqueda && <button onClick={() => setBusqueda('')} className="p-1 hover:bg-slate-100 rounded-lg transition-colors"><X size={14} className="text-slate-400" /></button>}
             </div>
 
             {/* Filtros */}

@@ -10,8 +10,10 @@ import {
   UserX, Plus, ChevronDown, Calendar, Archive
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { supabaseStorage, uploadToCorrectBucket, deleteFromCorrectBucket } from '@/lib/supabaseStorage';
+import { supabaseStorage, uploadToCorrectBucket, deleteFromCorrectBucket, sanitizeFilename } from '@/lib/supabaseStorage';
 import { Expediente, DocumentoExpediente, CARGOS, TIPOS_DOCUMENTO, DOCUMENTOS_ESENCIALES } from '@/types';
+import DocumentViewer from '@/components/DocumentViewer';
+import JSZip from 'jszip';
 
 const cargoColor: Record<string, string> = {
   'CONTRATISTAS DE ADMINISTRACION': 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -80,6 +82,7 @@ export default function ExpedienteDetallePage() {
   const [descargando, setDescargando] = useState(false);
   const [editandoDocId, setEditandoDocId] = useState<string | null>(null);
   const [notaEditando, setNotaEditando] = useState('');
+  const [documentoParaVer, setDocumentoParaVer] = useState<DocumentoExpediente | null>(null);
 
   const cargar = useCallback(async () => {
     setLoading(true); setError(null);
@@ -121,7 +124,8 @@ export default function ExpedienteDetallePage() {
     
     try {
       // 1. Subir a la NUEVA cuenta de Supabase Storage usando el helper robusto
-      const path = `${id}/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+      const sanitizedName = sanitizeFilename(file.name);
+      const path = `${id}/${Date.now()}_${sanitizedName}`;
       const { url, path: finalPath } = await uploadToCorrectBucket(path, file);
 
       // 2. Guardar referencia en la base de datos principal de Supabase
@@ -189,20 +193,50 @@ export default function ExpedienteDetallePage() {
   };
 
   const descargarTodo = async () => {
-    if (documentos.length === 0) return;
+    if (documentos.length === 0 || !expediente) return;
     setDescargando(true);
-    // Descargar uno por uno en secuencia
-    for (const doc of documentos) {
-      const a = document.createElement('a');
-      a.href = doc.url;
-      a.download = doc.nombre_archivo;
-      a.target = '_blank';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      await new Promise(r => setTimeout(r, 500));
+    setError(null);
+    
+    try {
+      const zip = new JSZip();
+      const folderName = `Expediente_${expediente.nombre.replace(/\s+/g, '_')}`;
+      const folder = zip.folder(folderName);
+      
+      if (!folder) throw new Error("No se pudo crear la carpeta en el ZIP");
+
+      // Descargar archivos y añadirlos al zip
+      const promesas = documentos.map(async (doc) => {
+        try {
+          const response = await fetch(doc.url);
+          if (!response.ok) throw new Error(`Fallo al descargar ${doc.nombre_archivo}`);
+          const blob = await response.blob();
+          
+          // Sanitizar nombre para evitar duplicados en el zip si hay archivos con mismo nombre
+          const extension = doc.nombre_archivo.split('.').pop();
+          const nombreLimpio = `${doc.tipo_documento.replace(/\s+/g, '_')}_${doc.id.slice(-4)}.${extension}`;
+          
+          folder.file(nombreLimpio, blob);
+        } catch (err) {
+          console.error(`Error procesando ${doc.nombre_archivo}:`, err);
+        }
+      });
+
+      await Promise.all(promesas);
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${folderName}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (err: any) {
+      console.error('Error al generar ZIP:', err);
+      setError('Error al generar el archivo ZIP: ' + err.message);
+    } finally {
+      setDescargando(false);
     }
-    setDescargando(false);
   };
 
   const eliminarExpediente = async () => {
@@ -259,9 +293,9 @@ export default function ExpedienteDetallePage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-emerald-100/30 blur-[120px] rounded-full -z-10 -translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-yellow-100/20 blur-[100px] rounded-full -z-10 translate-x-1/4 translate-y-1/4" />
+    <div className="min-h-screen bg-slate-50 relative overflow-hidden selection:bg-emerald-100 selection:text-emerald-900">
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-emerald-100/40 blur-[140px] rounded-full -z-10 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+      <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-yellow-100/30 blur-[120px] rounded-full -z-10 translate-x-1/4 translate-y-1/4" />
 
       {/* Modal eliminar */}
       {confirmEliminarExp && (
@@ -277,16 +311,16 @@ export default function ExpedienteDetallePage() {
         </div>
       )}
 
-      <nav className="bg-white/70 backdrop-blur-xl border-b border-gray-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <nav className="max-w-7xl mx-auto mt-6 px-6 sticky top-6 z-40">
+        <div className="glass-panel rounded-[2rem] px-8 py-4 flex items-center justify-between shadow-2xl shadow-emerald-900/5">
           <div className="flex items-center gap-4">
-            <div className="relative w-12 h-12 bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              <Image src="/LOGO.png" alt="Fundamiga Logo" fill sizes="48px" className="object-contain p-1.5" priority />
+            <div className="relative w-11 h-11 bg-white rounded-2xl shadow-inner overflow-hidden border border-slate-100 p-1.5">
+              <Image src="/LOGO.png" alt="Fundamiga Logo" fill sizes="48px" className="object-contain" priority />
             </div>
             <div>
-              <span className="text-xl font-black text-slate-800 tracking-tighter leading-none block">Fundamiga</span>
-              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.15em] mt-1.5 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />Expediente de Personal
+              <span className="text-xl font-black text-slate-800 tracking-tighter leading-none block premium-gradient-text">Fundamiga</span>
+              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-[0.2em] mt-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />Perfil de Colaborador
               </p>
             </div>
           </div>
@@ -294,28 +328,29 @@ export default function ExpedienteDetallePage() {
             {!editando ? (
               <>
                 <button onClick={() => setEditando(true)}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-xs transition-all">
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-xs transition-all border border-amber-100">
                   <Pencil size={13} />Editar
                 </button>
                 <button onClick={() => setConfirmEliminarExp(true)}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 font-bold text-xs transition-all">
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold text-xs transition-all border border-rose-100">
                   <Trash2 size={13} />Eliminar
                 </button>
               </>
             ) : (
               <>
                 <button onClick={guardarEdicion} disabled={guardando || guardado}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition-all disabled:opacity-60">
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition-all disabled:opacity-60 shadow-lg shadow-emerald-100">
                   {guardando ? <RefreshCw size={13} className="animate-spin" /> : guardado ? <><Check size={13} />¡Guardado!</> : <><Save size={13} />Guardar cambios</>}
                 </button>
                 <button onClick={() => { setEditando(false); setFormEdit(expediente); }}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-slate-500 hover:bg-gray-50 font-bold text-xs transition-all">
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-50 text-slate-500 hover:bg-slate-100 font-bold text-xs transition-all border border-slate-100">
                   <X size={13} />Cancelar
                 </button>
               </>
             )}
-            <Link href="/" className="group flex items-center gap-2 text-slate-500 hover:text-emerald-700 transition-all px-5 py-2.5 rounded-2xl hover:bg-emerald-50 border border-transparent hover:border-emerald-100/50 shadow-sm font-black text-sm">
-              <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />Volver
+            <div className="w-px h-6 bg-slate-200 mx-1" />
+            <Link href="/" className="group flex items-center gap-2 text-slate-500 hover:text-emerald-700 transition-all px-5 py-2.5 rounded-2xl bg-slate-50 hover:bg-emerald-50 border border-slate-100 hover:border-emerald-100 font-black text-xs">
+              <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />Volver
             </Link>
           </div>
         </div>
@@ -350,16 +385,16 @@ export default function ExpedienteDetallePage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
 
           {/* Perfil */}
-          <div className="lg:col-span-1 sticky top-28 space-y-4">
-            <div className="bg-white rounded-[2rem] border border-gray-100 overflow-hidden shadow-sm hover:shadow-2xl hover:shadow-emerald-50 transition-all duration-500">
+          <div className="lg:col-span-1 sticky top-28 space-y-6">
+            <div className="bg-white rounded-[2.5rem] border border-white shadow-[0_20px_50px_rgba(0,0,0,0.04)] overflow-hidden transition-all duration-500 hover:shadow-[0_20px_50px_rgba(16,185,129,0.08)]">
               <div className={`p-6 ${expediente.estado === 'Activo' ? 'bg-emerald-600' : 'bg-slate-600'}`}>
                 <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-3">
                   <span className="text-3xl font-black text-white">{expediente.nombre.charAt(0).toUpperCase()}</span>
                 </div>
                 {!editando ? (
                   <>
-                    <h2 className="text-xl font-black text-white leading-tight">{expediente.nombre}</h2>
-                    <p className="text-white/70 text-xs mt-1 font-mono">C.C. {expediente.cedula || 'No registrada'}</p>
+                    <h2 className="text-2xl font-black text-white leading-tight tracking-tighter">{expediente.nombre}</h2>
+                    <p className="text-white/80 text-[11px] mt-1.5 font-mono bg-black/10 w-fit px-2 py-0.5 rounded-md border border-white/10 italic">C.C. {expediente.cedula || 'No registrada'}</p>
                   </>
                 ) : (
                   <div className="space-y-2">
@@ -421,11 +456,12 @@ export default function ExpedienteDetallePage() {
                 </div>
 
                 {/* Tiempo */}
-                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600 mb-1">
+                <div className="bg-emerald-50/50 backdrop-blur-sm border border-emerald-100 rounded-2xl p-4 transition-all hover:bg-emerald-50">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-1.5 flex items-center gap-2">
+                    <Clock size={10} />
                     {expediente.estado === 'Activo' ? 'Tiempo en la empresa' : 'Tiempo trabajado'}
                   </p>
-                  <p className="text-sm font-black text-emerald-700">{tiempoEnEmpresa()}</p>
+                  <p className="text-sm font-black text-emerald-700 tracking-tight">{tiempoEnEmpresa()}</p>
                 </div>
 
                 {/* Fecha retiro */}
@@ -459,9 +495,9 @@ export default function ExpedienteDetallePage() {
 
             {/* Documentos faltantes */}
             {faltantes.length > 0 && (
-              <div className="bg-white rounded-2xl border border-amber-100 shadow-sm p-5">
-                <p className="text-[9px] font-black uppercase tracking-widest text-amber-500 mb-3 flex items-center gap-1.5">
-                  <AlertCircle size={11} />Documentos faltantes
+              <div className="bg-amber-50/50 backdrop-blur-sm rounded-[2rem] border border-amber-100 p-6 shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 mb-4 flex items-center gap-2">
+                  <AlertCircle size={14} /> Faltantes esenciales
                 </p>
                 <div className="space-y-1.5">
                   {faltantes.map(d => (
@@ -491,9 +527,9 @@ export default function ExpedienteDetallePage() {
           </div>
 
           {/* Documentos */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-8">
             {/* Subir */}
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm p-6">
+            <div className="bg-white rounded-[2.5rem] border border-white shadow-[0_20px_50px_rgba(0,0,0,0.04)] p-8">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
                   <Upload size={14} className="text-blue-600" />
@@ -529,7 +565,7 @@ export default function ExpedienteDetallePage() {
             </div>
 
             {/* Lista documentos */}
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
+            <div className="bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white shadow-[0_20px_50px_rgba(0,0,0,0.04)] overflow-hidden">
               <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
@@ -602,10 +638,11 @@ export default function ExpedienteDetallePage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                            <button 
+                              onClick={() => setDocumentoParaVer(doc)}
                               className="p-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 transition-all" title="Ver">
                               <Eye size={13} />
-                            </a>
+                            </button>
                             <a href={doc.url} download={doc.nombre_archivo}
                               className="p-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-100 transition-all" title="Descargar">
                               <Download size={13} />
@@ -634,6 +671,16 @@ export default function ExpedienteDetallePage() {
           </div>
         </div>
       </div>
+      
+      {/* Visor de documentos */}
+      {documentoParaVer && (
+        <DocumentViewer 
+          url={documentoParaVer.url}
+          nombreArchivo={documentoParaVer.nombre_archivo}
+          tipoDocumento={documentoParaVer.tipo_documento}
+          onClose={() => setDocumentoParaVer(null)}
+        />
+      )}
     </div>
   );
 }

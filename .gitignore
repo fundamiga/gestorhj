@@ -37,3 +37,8 @@ Thumbs.db
 
 # 🧹 Cache
 .cache/
+
+# 🏗️ Electron Build
+release/
+dist/
+dist-electron/
