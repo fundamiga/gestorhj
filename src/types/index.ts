@@ -8,6 +8,7 @@ export interface Expediente {
   fecha_retiro?: string;
   observaciones?: string;
   creado_at?: string;
+  es_remesa?: boolean;
 }
 
 export interface DocumentoExpediente {
