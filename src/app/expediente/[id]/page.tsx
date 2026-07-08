@@ -510,6 +510,49 @@ export default function ExpedienteDetallePage() {
               </div>
             )}
 
+            {/* Accesos rápidos a portales */}
+            <div className="bg-blue-50/50 backdrop-blur-sm rounded-[2rem] border border-blue-100 p-6 shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-4 flex items-center gap-2">
+                <Archive size={14} /> Enlaces Rápidos (Consultas)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <a href="https://antecedentes.policia.gov.co:7005/WebJudicial/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl bg-white border border-blue-100 hover:bg-blue-50 hover:border-blue-200 transition-all text-center group shadow-sm">
+                  <span className="text-lg group-hover:scale-110 transition-transform">👮</span>
+                  <span className="text-[10px] font-bold text-slate-600">Policía</span>
+                </a>
+                <a href="https://apps.procuraduria.gov.co/webcert/Certificado.aspx?t=dAylAkFT/gSkkvpDoI89aORiq2C8LI3z9uHAnBFaF08/32nPrGQhH4HhIkyJHgMD30HMssetl++bdWkP7Sm944+rbvuDNxchPUJUgI2F1PlipvVlkwZR+TABjraDbp0hlrwP2GCLMX8Rl+aw1u6GwgGEkvY16WZ4qm8sL17YyY5FLVGWSy+Eys6FEeWWKx6G+Rm/XaHa4L9eayTZkhzvIL4bJrDB501fmA/wv3NJ74I=&tpo=2" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl bg-white border border-blue-100 hover:bg-blue-50 hover:border-blue-200 transition-all text-center group shadow-sm">
+                  <span className="text-lg group-hover:scale-110 transition-transform">⚖️</span>
+                  <span className="text-[10px] font-bold text-slate-600">Procuraduría</span>
+                </a>
+                <a href="https://www.contraloria.gov.co/web/guest/persona-natural" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl bg-white border border-blue-100 hover:bg-blue-50 hover:border-blue-200 transition-all text-center group shadow-sm">
+                  <span className="text-lg group-hover:scale-110 transition-transform">📊</span>
+                  <span className="text-[10px] font-bold text-slate-600">Contraloría</span>
+                </a>
+                <a href="https://www.adres.gov.co/consulte-su-eps" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl bg-white border border-blue-100 hover:bg-blue-50 hover:border-blue-200 transition-all text-center group shadow-sm">
+                  <span className="text-lg group-hover:scale-110 transition-transform">🏥</span>
+                  <span className="text-[10px] font-bold text-slate-600">EPS / ADRES</span>
+                </a>
+              </div>
+              <div className="mt-4 bg-blue-100/50 p-2.5 rounded-xl flex items-center justify-between">
+                 <span className="text-[9px] font-black text-blue-500 uppercase">Cédula para consultar:</span>
+                 <button 
+                  onClick={(e) => { 
+                    if(expediente.cedula) {
+                      navigator.clipboard.writeText(expediente.cedula);
+                      const el = e.currentTarget;
+                      const original = el.innerHTML;
+                      el.innerHTML = '<span class="flex items-center gap-1 text-emerald-600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copiado</span>';
+                      setTimeout(() => el.innerHTML = original, 1500);
+                    }
+                  }}
+                  title="Haz clic para copiar la cédula"
+                  className="text-xs font-black text-blue-800 bg-white px-3 py-1 rounded-lg border border-blue-200 shadow-sm hover:bg-blue-50 hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer">
+                   {expediente.cedula || 'N/A'}
+                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400 group-hover:text-blue-600"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                 </button>
+              </div>
+            </div>
+
             {/* Resumen tipos */}
             {documentos.length > 0 && (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">

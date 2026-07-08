@@ -9,7 +9,7 @@ out/
 build/
 dist/
 
-# 🔐 Variables de entorno (MUY IMPORTANTE)
+# 🔐 Variables de entorno (MUY IMPORTANTEsd)
 .env
 .env.local
 .env.development.local
