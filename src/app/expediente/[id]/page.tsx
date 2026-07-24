@@ -109,6 +109,8 @@ export default function ExpedienteDetallePage() {
       estado: formEdit.estado,
       fecha_retiro: formEdit.fecha_retiro?.trim() ? formEdit.fecha_retiro : null,
       observaciones: formEdit.observaciones || null,
+      correo: formEdit.correo || null,
+      telefono: formEdit.telefono || null,
     }).eq('id', id);
     if (error) { setError('Error al guardar: ' + error.message); setGuardando(false); return; }
     setExpediente(prev => prev ? { ...prev, ...formEdit } as Expediente : prev);
@@ -120,13 +122,27 @@ export default function ExpedienteDetallePage() {
   const subirDocumento = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Validación de tamaño máximo permitido: 50MB
+    const MAX_SIZE_MB = 50;
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setError(`El archivo es demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). El máximo permitido es ${MAX_SIZE_MB} MB.`);
+      e.target.value = '';
+      return;
+    }
+
     setSubiendo(true); setError(null);
     
     try {
-      // 1. Subir a la NUEVA cuenta de Supabase Storage usando el helper robusto
+      let url = '';
+      let storagePath = '';
+
+      // ── Subir todos los archivos a Supabase Storage (Migración completa) ──
       const sanitizedName = sanitizeFilename(file.name);
       const path = `${id}/${Date.now()}_${sanitizedName}`;
-      const { url, path: finalPath } = await uploadToCorrectBucket(path, file);
+      const result = await uploadToCorrectBucket(path, file);
+      url = result.url;
+      storagePath = result.path;
 
       // 2. Guardar referencia en la base de datos principal de Supabase
       const docId = Date.now().toString();
@@ -136,13 +152,12 @@ export default function ExpedienteDetallePage() {
         nombre_archivo: file.name,
         tipo_documento: tipoDoc,
         url: url,
-        storage_path: finalPath,
+        storage_path: storagePath,
         fecha_vencimiento: fechaVencDoc || null,
         notas: notaDoc.trim() || null,
       };
 
       const { error: dbError } = await supabase.from('documentos_expediente').insert(newDoc);
-      
       if (dbError) throw dbError;
 
       setDocumentos(prev => [
@@ -166,14 +181,22 @@ export default function ExpedienteDetallePage() {
     setEliminandoDoc(doc.id);
     
     try {
-      const isNewSupabase = doc.url.includes('gimldpldmkqvgizkczrs'); // Detectar si es la cuenta nueva
+      const isCloudinary = doc.url.includes('cloudinary.com');
+      const isOldSupabase = doc.url.includes('uvdbfnpinyxqcqocdyiv');
 
-      if (isNewSupabase) {
-        // Eliminar de la nueva cuenta usando el helper robusto
-        await deleteFromCorrectBucket(doc.storage_path);
-      } else {
-        // Eliminar de la cuenta vieja (principal)
+      if (isCloudinary) {
+        // Eliminar de Cloudinary via API route
+        await fetch('/api/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicId: doc.storage_path }),
+        });
+      } else if (isOldSupabase) {
+        // Eliminar de la cuenta principal de Supabase (documentos legacy)
         await supabase.storage.from('expedientes').remove([doc.storage_path]);
+      } else {
+        // Eliminar de Supabase Storage secundario (documentos legacy de respaldo)
+        await deleteFromCorrectBucket(doc.storage_path);
       }
 
       await supabase.from('documentos_expediente').delete().eq('id', doc.id);
@@ -395,6 +418,12 @@ export default function ExpedienteDetallePage() {
                   <>
                     <h2 className="text-2xl font-black text-white leading-tight tracking-tighter">{expediente.nombre}</h2>
                     <p className="text-white/80 text-[11px] mt-1.5 font-mono bg-black/10 w-fit px-2 py-0.5 rounded-md border border-white/10 italic">C.C. {expediente.cedula || 'No registrada'}</p>
+                    {(expediente.correo || expediente.telefono) && (
+                      <div className="mt-2 space-y-1">
+                        {expediente.correo && <p className="text-white/80 text-[10px] flex items-center gap-1.5"><span className="opacity-50">✉️</span> {expediente.correo}</p>}
+                        {expediente.telefono && <p className="text-white/80 text-[10px] flex items-center gap-1.5"><span className="opacity-50">📞</span> {expediente.telefono}</p>}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="space-y-2">
@@ -403,6 +432,13 @@ export default function ExpedienteDetallePage() {
                       className="w-full px-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white placeholder:text-white/50 font-bold text-sm outline-none focus:bg-white/30" />
                     <input value={formEdit.cedula || ''} onChange={e => setFormEdit(p => ({ ...p, cedula: e.target.value }))}
                       placeholder="Cédula"
+                      className="w-full px-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white placeholder:text-white/50 font-semibold text-xs outline-none" />
+                    <input value={formEdit.correo || ''} onChange={e => setFormEdit(p => ({ ...p, correo: e.target.value }))}
+                      placeholder="Correo electrónico"
+                      type="email"
+                      className="w-full px-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white placeholder:text-white/50 font-semibold text-xs outline-none" />
+                    <input value={formEdit.telefono || ''} onChange={e => setFormEdit(p => ({ ...p, telefono: e.target.value }))}
+                      placeholder="Teléfono/Celular"
                       className="w-full px-3 py-2 rounded-xl bg-white/20 border border-white/30 text-white placeholder:text-white/50 font-semibold text-xs outline-none" />
                   </div>
                 )}
@@ -706,7 +742,7 @@ export default function ExpedienteDetallePage() {
                 <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                   <p className="text-[10px] text-slate-400 font-bold">{documentos.length} documento{documentos.length !== 1 ? 's' : ''}</p>
                   <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Nuevos archivos almacenados en Cuenta de Respaldo
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Archivos almacenados en Cloudinary
                   </p>
                 </div>
               )}

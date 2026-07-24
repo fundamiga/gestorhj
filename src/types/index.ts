@@ -9,6 +9,8 @@ export interface Expediente {
   observaciones?: string;
   creado_at?: string;
   es_remesa?: boolean;
+  correo?: string;
+  telefono?: string;
 }
 
 export interface DocumentoExpediente {

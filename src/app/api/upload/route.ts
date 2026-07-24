@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import cloudinary from '@/lib/cloudinary';
 
+// Aumentar el límite del body para archivos grandes
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+};
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -21,7 +30,7 @@ export async function POST(request: NextRequest) {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: `${folder}/${expedienteId}`,
-          resource_type: 'auto', // Detecta automáticamente si es imagen, pdf, etc.
+          resource_type: 'auto',
           public_id: `${Date.now()}_${file.name.split('.')[0].replace(/\s+/g, '_')}`,
         },
         (error, result) => {
