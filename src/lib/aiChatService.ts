@@ -114,27 +114,49 @@ async function processSupabaseQuery(query: string): Promise<string> {
     return `🚚 **Expedientes en Sección Remesas** (Total: ${remesas.length}):\n\n${lista}`;
   }
 
-  // ── INTENTO 4: BÚSQUEDA DE PERSONA ESPECÍFICA POR NOMBRE O CÉDULA ─────────
-  // Filtrar palabras comunes de relleno o saludos
+  // ── INTENTO 4: BÚSQUEDA MULTI-PALABRA (NOMBRES, APELLIDOS O CÉDULAS) ─────────
   const palabrasIgnoradas = new Set([
     'busca', 'buscar', 'dame', 'info', 'informacion', 'telefono', 'correo', 'cedula',
     'de', 'el', 'la', 'los', 'las', 'un', 'una', 'hola', 'buenos', 'dias', 'tardes', 'noches',
-    'por', 'favor', 'quien', 'es', 'ver'
+    'por', 'favor', 'quien', 'es', 'ver', 'datos', 'expediente'
   ]);
 
-  const terminosLimpios = q
+  const tokens = q
     .split(/\s+/)
-    .filter(palabra => palabra.length > 2 && !palabrasIgnoradas.has(palabra))
-    .join(' ');
+    .filter(palabra => palabra.length >= 2 && !palabrasIgnoradas.has(palabra));
 
-  if (terminosLimpios.length >= 3) {
-    const { data: resultados } = await supabase
-      .from('expedientes')
-      .select('*')
-      .or(`nombre.ilike.%${terminosLimpios}%,cedula.ilike.%${terminosLimpios}%`)
-      .limit(3);
+  if (tokens.length > 0) {
+    // 1. Coincidencia estricta: Todas las palabras deben estar presentes en el nombre (AND)
+    let queryAnd = supabase.from('expedientes').select('*');
+    for (const t of tokens) {
+      queryAnd = queryAnd.ilike('nombre', `%${t}%`);
+    }
+    const { data: resAnd } = await queryAnd.limit(5);
 
-    if (resultados && resultados.length > 0) {
+    let resultados = resAnd || [];
+
+    // 2. Si no hay resultados AND, probar por Cédula (parcial o exacta)
+    if (resultados.length === 0 && /^\d+$/.test(tokens.join(''))) {
+      const { data: resCedula } = await supabase
+        .from('expedientes')
+        .select('*')
+        .ilike('cedula', `%${tokens.join('')}%`)
+        .limit(5);
+      resultados = resCedula || [];
+    }
+
+    // 3. Si sigue sin resultados y hay varias palabras, probar búsqueda flexible por cualquier palabra (OR)
+    if (resultados.length === 0 && tokens.length > 1) {
+      const condOr = tokens.map(t => `nombre.ilike.%${t}%,cedula.ilike.%${t}%`).join(',');
+      const { data: resOr } = await supabase
+        .from('expedientes')
+        .select('*')
+        .or(condOr)
+        .limit(5);
+      resultados = resOr || [];
+    }
+
+    if (resultados.length > 0) {
       let respuesta = `🔎 **Resultados encontrados (${resultados.length})**:\n\n`;
 
       for (const p of resultados) {
@@ -166,5 +188,5 @@ async function processSupabaseQuery(query: string): Promise<string> {
 
   // Respuesta por defecto si no entendió la intención ni encontró resultados
   return `🤖 No encontré coincidencias para "${query}".\n\n` +
-    `Prueba escribiendo el **nombre completo**, un **apellido** o el **número de cédula** exacto del trabajador.`;
+    `Prueba escribiendo un **nombre**, **apellido** (ej: *diana arias* o *arias*) o el **número de cédula**.`;
 }
