@@ -41,7 +41,17 @@ export async function processAIChatMessage(message: string): Promise<string> {
 }
 
 async function processSupabaseQuery(query: string): Promise<string> {
-  const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  // ── INTENTO 0: SALUDOS Y CONVERSACIÓN BÁSICA ──────────────────────────────
+  const esSaludo = /^(hola|buenos\s*dias|buenas\s*tardes|buenas\s*noches|saludos|que\s*tal|buenas|hi|hello)\b/i.test(q);
+  if (esSaludo || q === 'hola') {
+    return `👋 **¡Hola! ¿En qué te puedo ayudar hoy?**\n\n` +
+      `Puedes escribirme el **nombre** o **cédula** de cualquier trabajador para consultar sus datos, o presionar las opciones rápidas:\n\n` +
+      `• 📊 **Resumen**: Para ver estadísticas del sistema\n` +
+      `• ⚠️ **Incompletos**: Para ver a quiénes les faltan documentos\n` +
+      `• 🚚 **Remesas**: Para listar el personal de la sección de remesas`;
+  }
 
   // ── INTENTO 1: RESUMEN / ESTADÍSTICAS GENERALES ────────────────────────────
   if (q.includes('resumen') || q.includes('cuantos') || q.includes('total') || q.includes('estadistica')) {
@@ -105,21 +115,29 @@ async function processSupabaseQuery(query: string): Promise<string> {
   }
 
   // ── INTENTO 4: BÚSQUEDA DE PERSONA ESPECÍFICA POR NOMBRE O CÉDULA ─────────
-  // Extraer posibles términos de búsqueda
-  const terminos = q.replace(/(busca|buscar|dame|info|informacion|telefono|correo|cedula|de|el|la|los|un|una)/g, '').trim();
+  // Filtrar palabras comunes de relleno o saludos
+  const palabrasIgnoradas = new Set([
+    'busca', 'buscar', 'dame', 'info', 'informacion', 'telefono', 'correo', 'cedula',
+    'de', 'el', 'la', 'los', 'las', 'un', 'una', 'hola', 'buenos', 'dias', 'tardes', 'noches',
+    'por', 'favor', 'quien', 'es', 'ver'
+  ]);
 
-  if (terminos.length >= 2) {
+  const terminosLimpios = q
+    .split(/\s+/)
+    .filter(palabra => palabra.length > 2 && !palabrasIgnoradas.has(palabra))
+    .join(' ');
+
+  if (terminosLimpios.length >= 3) {
     const { data: resultados } = await supabase
       .from('expedientes')
       .select('*')
-      .or(`nombre.ilike.%${terminos}%,cedula.ilike.%${terminos}%`)
+      .or(`nombre.ilike.%${terminosLimpios}%,cedula.ilike.%${terminosLimpios}%`)
       .limit(3);
 
     if (resultados && resultados.length > 0) {
       let respuesta = `🔎 **Resultados encontrados (${resultados.length})**:\n\n`;
 
       for (const p of resultados) {
-        // Consultar sus documentos
         const { data: docs } = await supabase
           .from('documentos_expediente')
           .select('tipo_documento')
@@ -146,11 +164,7 @@ async function processSupabaseQuery(query: string): Promise<string> {
     }
   }
 
-  // Respuesta por defecto si no entendió la intención específica
-  return `🤖 Hola, soy el **Asistente Fundamiga**. Puedo ayudarte con:\n\n` +
-    `1. Buscar cualquier trabajador por **Nombre** o **Cédula**.\n` +
-    `2. Ver el **Resumen general** de expedientes.\n` +
-    `3. Consultar **Documentos pendientes o incompletos**.\n` +
-    `4. Ver la lista de expedientes en **Remesas**.\n\n` +
-    `¿Qué información deseas consultar?`;
+  // Respuesta por defecto si no entendió la intención ni encontró resultados
+  return `🤖 No encontré coincidencias para "${query}".\n\n` +
+    `Prueba escribiendo el **nombre completo**, un **apellido** o el **número de cédula** exacto del trabajador.`;
 }
