@@ -2,13 +2,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, FileCode } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText } from 'lucide-react';
 import { processAIChatMessage, ChatMessage, ChatAction } from '@/lib/aiChatService';
 import { generarCartaRecomendacionPDF, generarCartaRecomendacionDOCX, descargarBlob } from '@/lib/documentGenerator';
 
 export default function AIChatWidget() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
@@ -26,6 +27,23 @@ export default function AIChatWidget() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    // Mostrar aviso emergente después de 1 segundo
+    const timerShow = setTimeout(() => {
+      setShowTooltip(true);
+    }, 1000);
+
+    // Ocultar aviso automáticamente después de 7 segundos
+    const timerHide = setTimeout(() => {
+      setShowTooltip(false);
+    }, 8000);
+
+    return () => {
+      clearTimeout(timerShow);
+      clearTimeout(timerHide);
+    };
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -203,7 +221,6 @@ export default function AIChatWidget() {
                       {msg.acciones.map((act, aIdx) => {
                         const isDocx = act.tipo === 'GENERAR_DOCX';
                         const isPdf = act.tipo === 'GENERAR_CERTIFICADO';
-                        const isNav = act.tipo === 'NAVEGAR';
                         const keyId = isDocx ? `${act.expediente?.id}-docx` : `${act.expediente?.id}-pdf`;
                         const isGenerating = generatingId === keyId;
 
@@ -303,21 +320,59 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* Botón Flotante Launcher */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="pointer-events-auto group relative w-14 h-14 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl shadow-xl flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95 border border-white/20"
-        title="Abrir Asistente Fundamiga"
-      >
-        {isOpen ? (
-          <ChevronDown size={24} />
-        ) : (
-          <div className="relative">
-            <Sparkles size={24} className="animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-indigo-600" />
+      {/* Launcher & Speech Bubble */}
+      <div className="flex items-center">
+        {/* Burbuja / Mensaje de Presentación */}
+        {showTooltip && !isOpen && (
+          <div
+            onClick={() => {
+              setIsOpen(true);
+              setShowTooltip(false);
+            }}
+            className="pointer-events-auto cursor-pointer mr-3 flex items-center gap-2.5 bg-slate-900/90 text-white text-xs py-2 px-3.5 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md animate-in fade-in slide-in-from-right-4 duration-300 hover:scale-105 transition-all"
+          >
+            <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0 text-amber-300 shadow-sm">
+              <Sparkles size={13} className="animate-spin [animation-duration:3s]" />
+            </div>
+            <div className="pr-1 text-left">
+              <p className="font-bold text-[11px] text-white flex items-center gap-1.5 leading-none">
+                ¡Nuevo Asistente IA!
+                <span className="text-[10px] text-indigo-300 font-normal">✨ Clic aquí</span>
+              </p>
+              <p className="text-[10px] text-slate-300 mt-0.5 leading-none">Consultas rápidas y cartas oficiales</p>
+            </div>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                setShowTooltip(false);
+              }}
+              className="text-slate-400 hover:text-white p-0.5 rounded transition-colors ml-1"
+              title="Cerrar aviso"
+            >
+              <X size={13} />
+            </button>
           </div>
         )}
-      </button>
+
+        {/* Botón Flotante Launcher */}
+        <button
+          onClick={() => {
+            setIsOpen(!isOpen);
+            setShowTooltip(false);
+          }}
+          className="pointer-events-auto group relative w-14 h-14 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl shadow-xl flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95 border border-white/20 flex-shrink-0"
+          title="Abrir Asistente Fundamiga"
+        >
+          {isOpen ? (
+            <ChevronDown size={24} />
+          ) : (
+            <div className="relative">
+              <Sparkles size={24} className="animate-pulse" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-indigo-600" />
+            </div>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
