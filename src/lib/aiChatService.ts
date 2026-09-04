@@ -240,24 +240,27 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
         }
         respuesta += `\n`;
 
-        const primerNombre = p.nombre.split(' ')[0];
-        accionesList.push(
-          {
-            label: `👁️ Abrir Expediente: ${primerNombre}`,
-            tipo: 'NAVEGAR',
-            expediente: p
-          },
-          {
-            label: `📝 Carta Recomendación (Word .DOCX Oficial): ${primerNombre}`,
-            tipo: 'GENERAR_DOCX',
-            expediente: p
-          },
-          {
-            label: `📑 Certificado Laboral (PDF): ${primerNombre}`,
-            tipo: 'GENERAR_CERTIFICADO',
-            expediente: p
-          }
-        );
+        accionesList.push({
+          label: `👁️ Abrir Expediente de ${p.nombre.split(' ')[0]}`,
+          tipo: 'NAVEGAR',
+          expediente: p
+        });
+
+        // Solo ofrecer generar carta si el usuario mencionó explícitamente 'carta', 'certificado' o 'recomendacion'
+        if (q.includes('carta') || q.includes('certificado') || q.includes('recomendacion') || q.includes('constancia')) {
+          accionesList.push(
+            {
+              label: `📝 Carta Recomendación (Word .DOCX Oficial)`,
+              tipo: 'GENERAR_DOCX',
+              expediente: p
+            },
+            {
+              label: `📑 Certificado Laboral (PDF)`,
+              tipo: 'GENERAR_CERTIFICADO',
+              expediente: p
+            }
+          );
+        }
       }
 
       return {
@@ -265,6 +268,7 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
         expedientesEncontrados: resultados,
         acciones: accionesList
       };
+
     }
   }
 
