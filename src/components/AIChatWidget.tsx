@@ -2,9 +2,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, CheckCircle2 } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, FileCode } from 'lucide-react';
 import { processAIChatMessage, ChatMessage, ChatAction } from '@/lib/aiChatService';
-import { generarCartaRecomendacionPDF, descargarBlob } from '@/lib/documentGenerator';
+import { generarCartaRecomendacionPDF, generarCartaRecomendacionDOCX, descargarBlob } from '@/lib/documentGenerator';
 
 export default function AIChatWidget() {
   const router = useRouter();
@@ -19,7 +19,7 @@ export default function AIChatWidget() {
   ]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -78,16 +78,29 @@ export default function AIChatWidget() {
     if (action.tipo === 'NAVEGAR' && action.expediente?.id) {
       setIsOpen(false);
       router.push(`/expediente/${action.expediente.id}`);
+    } else if (action.tipo === 'GENERAR_DOCX' && action.expediente) {
+      const keyId = `${action.expediente.id}-docx`;
+      setGeneratingId(keyId);
+      try {
+        const blob = await generarCartaRecomendacionDOCX(action.expediente);
+        const nombreLimpio = action.expediente.nombre.replace(/[^a-zA-Z0-9]/g, '_');
+        descargarBlob(blob, `Carta_Recomendacion_${nombreLimpio}.docx`);
+      } catch (err: any) {
+        console.error('Error generando Word DOCX:', err);
+      } finally {
+        setGeneratingId(null);
+      }
     } else if (action.tipo === 'GENERAR_CERTIFICADO' && action.expediente) {
-      setGeneratingPdfId(action.expediente.id);
+      const keyId = `${action.expediente.id}-pdf`;
+      setGeneratingId(keyId);
       try {
         const blob = await generarCartaRecomendacionPDF(action.expediente);
         const nombreLimpio = action.expediente.nombre.replace(/[^a-zA-Z0-9]/g, '_');
-        descargarBlob(blob, `Carta_Recomendacion_${nombreLimpio}.pdf`);
-      } catch (err) {
+        descargarBlob(blob, `Certificado_Laboral_${nombreLimpio}.pdf`);
+      } catch (err: any) {
         console.error('Error generando PDF:', err);
       } finally {
-        setGeneratingPdfId(null);
+        setGeneratingId(null);
       }
     }
   };
@@ -116,7 +129,7 @@ export default function AIChatWidget() {
     <div className="fixed bottom-6 right-6 z-[9990] flex flex-col items-end pointer-events-none">
       {/* Ventana de Chat */}
       {isOpen && (
-        <div className="pointer-events-auto mb-3 w-[360px] sm:w-[420px] h-[540px] max-h-[82vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
+        <div className="pointer-events-auto mb-3 w-[360px] sm:w-[420px] h-[550px] max-h-[82vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
           {/* Header */}
           <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-4 text-white flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
@@ -128,7 +141,7 @@ export default function AIChatWidget() {
                   Asistente Fundamiga
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 </h3>
-                <p className="text-[11px] text-indigo-100">Acciones directas y Certificados PDF</p>
+                <p className="text-[11px] text-indigo-100">Cartas Word (.DOCX) y PDF Oficiales</p>
               </div>
             </div>
 
@@ -187,35 +200,47 @@ export default function AIChatWidget() {
                   {/* Renderizar Botones de Acción si existen */}
                   {msg.acciones && msg.acciones.length > 0 && (
                     <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
-                      {msg.acciones.map((act, aIdx) => (
-                        <button
-                          key={aIdx}
-                          onClick={() => handleExecuteAction(act)}
-                          disabled={generatingPdfId === act.expediente?.id}
-                          className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
-                            act.tipo === 'GENERAR_CERTIFICADO'
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
-                          }`}
-                        >
-                          {act.tipo === 'GENERAR_CERTIFICADO' ? (
-                            generatingPdfId === act.expediente?.id ? (
+                      {msg.acciones.map((act, aIdx) => {
+                        const isDocx = act.tipo === 'GENERAR_DOCX';
+                        const isPdf = act.tipo === 'GENERAR_CERTIFICADO';
+                        const isNav = act.tipo === 'NAVEGAR';
+                        const keyId = isDocx ? `${act.expediente?.id}-docx` : `${act.expediente?.id}-pdf`;
+                        const isGenerating = generatingId === keyId;
+
+                        return (
+                          <button
+                            key={aIdx}
+                            onClick={() => handleExecuteAction(act)}
+                            disabled={isGenerating}
+                            className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                              isDocx
+                                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                : isPdf
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                            }`}
+                          >
+                            {isGenerating ? (
                               <>
                                 <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Generando PDF...
+                                Generando documento...
                               </>
-                            ) : (
+                            ) : isDocx ? (
+                              <>
+                                <FileText size={13} /> {act.label}
+                              </>
+                            ) : isPdf ? (
                               <>
                                 <Download size={13} /> {act.label}
                               </>
-                            )
-                          ) : (
-                            <>
-                              <Eye size={13} /> {act.label}
-                            </>
-                          )}
-                        </button>
-                      ))}
+                            ) : (
+                              <>
+                                <Eye size={13} /> {act.label}
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 

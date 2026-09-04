@@ -1,17 +1,28 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import PizZip from 'pizzip';
+import Docxtemplater from 'docxtemplater';
 import { Expediente } from '@/types';
+
+function numeroATexto(num: number): string {
+  const numeros = [
+    'cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez',
+    'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
+    'veintiuno', 'veintidós', 'veintitrés', 'veinticincos', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta', 'treinta y uno'
+  ];
+  return numeros[num] || num.toString();
+}
 
 function inferirTratamiento(nombreCompleto: string) {
   const norm = (nombreCompleto || '').toLowerCase();
   const palabras = norm.split(/\s+/);
   const n1 = palabras[0] || '';
   const n2 = palabras[1] || '';
-  const nombresFemeninos = ['diana', 'maria', 'ana', 'isabella', 'erika', 'angela', 'emilce', 'jamileth', 'sonia', 'johana', 'isamar', 'mildred', 'melissa', 'carolina', 'patricia', 'sandra', 'gloria', 'luz', 'claudia', 'martha', 'rosa', 'marlen'];
+  const nombresFemeninos = ['diana', 'maria', 'ana', 'isabella', 'erika', 'angela', 'emilce', 'jamileth', 'sonia', 'johana', 'isamar', 'mildred', 'mariland', 'melissa', 'carolina', 'patricia', 'sandra', 'gloria', 'luz', 'claudia', 'martha', 'rosa', 'marlen'];
   
   if (nombresFemeninos.includes(n1) || nombresFemeninos.includes(n2) || n1.endsWith('a')) {
-    return { tratamiento: 'la señora', pronombre: 'ella' };
+    return { tratamiento: 'la señora', ref: 'la señora' };
   }
-  return { tratamiento: 'el señor', pronombre: 'él' };
+  return { tratamiento: 'el señor', ref: 'el señor' };
 }
 
 function formatearCedula(cedula: string) {
@@ -21,21 +32,70 @@ function formatearCedula(cedula: string) {
   return num.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
-function formatearFecha(fechaStr?: string) {
-  if (!fechaStr) return 'la fecha estipulada en el contrato';
+function formatearFechaEspanol(fechaStr?: string) {
+  if (!fechaStr) return 'la fecha de ingreso';
   try {
     const [y, m, d] = fechaStr.split('-');
     if (!y || !m || !d) return fechaStr;
     const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    return `${parseInt(d, 10)} de ${meses[parseInt(m, 10) - 1]} de ${y}`;
+    const diaNum = parseInt(d, 10);
+    const diaTexto = (diaNum < 10 ? '0' : '') + diaNum;
+    return `${diaTexto} de ${meses[parseInt(m, 10) - 1]} de ${y}`;
   } catch (e) {
     return fechaStr;
   }
 }
 
+// ── GENERAR CARTA EN WORD (.DOCX) USANDO LA PLANTILLA OFICIAL DE FUNDAMIGA ──────
+export async function generarCartaRecomendacionDOCX(expediente: Expediente): Promise<Blob> {
+  const response = await fetch('/plantilla_carta_recomendacion.docx');
+  if (!response.ok) {
+    throw new Error('No se pudo cargar la plantilla plantilla_carta_recomendacion.docx');
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const zip = new PizZip(arrayBuffer);
+  const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+
+  const hoy = new Date();
+  const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const diaNum = hoy.getDate();
+  const diaTexto = numeroATexto(diaNum);
+  const mesTexto = meses[hoy.getMonth()];
+  const anioTexto = hoy.getFullYear().toString();
+
+  const fechaCarta = `${diaNum} de ${mesTexto} de ${anioTexto}`;
+  const tratamientoObj = inferirTratamiento(expediente.nombre);
+
+  const partesNombre = (expediente.nombre || '').split(/\s+/);
+  const apellidoRef = partesNombre.slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+  doc.render({
+    FECHA_CARTA: fechaCarta,
+    TRATAMIENTO: tratamientoObj.tratamiento,
+    NOMBRE_COMPLETO: (expediente.nombre || '').toUpperCase(),
+    CEDULA: formatearCedula(expediente.cedula),
+    CARGO: expediente.cargo || 'Trabajador/a',
+    FECHA_INGRESO: formatearFechaEspanol(expediente.fecha_ingreso),
+    TRATAMIENTO_REF: tratamientoObj.ref,
+    APELLIDO_REF: apellidoRef,
+    USUARIOS_TIPO: 'los usuarios y beneficiarios de la fundación',
+    DIAS_TEXTO: `${diaTexto} (${diaNum})`,
+    MES_ANIO_TEXTO: `${mesTexto} de ${anioTexto}`
+  });
+
+  const blob = doc.getZip().generate({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  });
+
+  return blob;
+}
+
+// ── GENERAR CARTA EN PDF ───────────────────────────────────────────────────────
 export async function generarCartaRecomendacionPDF(expediente: Expediente): Promise<Blob> {
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595.28, 841.89]); // Tamaño A4 en puntos
+  const page = pdfDoc.addPage([595.28, 841.89]);
 
   const fontHelvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontHelveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -43,13 +103,13 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
   const { width, height } = page.getSize();
   const margin = 50;
 
-  // Header - Membrete Fundamiga
+  // Header Membrete
   page.drawRectangle({
     x: margin,
     y: height - 80,
     width: width - (margin * 2),
     height: 40,
-    color: rgb(0.12, 0.23, 0.54) // Azul marino Fundamiga
+    color: rgb(0.12, 0.23, 0.54)
   });
 
   page.drawText('FUNDACIÓN AMIGA - FUNDAMIGA', {
@@ -70,11 +130,10 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
 
   const hoy = new Date();
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-  const fechaHoyStr = `${hoy.getDate()} de ${meses[hoy.getMonth()]} de ${hoy.getFullYear()}`;
+  const fechaCartaStr = `${hoy.getDate()} de ${meses[hoy.getMonth()]} de ${hoy.getFullYear()}`;
 
-  // Fecha y Título
   let yPos = height - 120;
-  page.drawText(`Santiago de Cali, ${fechaHoyStr}`, {
+  page.drawText(`Santiago de Cali, ${fechaCartaStr}`, {
     x: width - margin - 180,
     y: yPos,
     size: 10,
@@ -83,10 +142,10 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
   });
 
   yPos -= 50;
-  page.drawText('CERTIFICACIÓN Y CARTA DE RECOMENDACIÓN LABORAL', {
+  page.drawText('CARTA DE RECOMENDACIÓN Y CERTIFICACIÓN LABORAL', {
     x: margin,
     y: yPos,
-    size: 13,
+    size: 12,
     font: fontHelveticaBold,
     color: rgb(0.12, 0.23, 0.54)
   });
@@ -95,17 +154,15 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
 
   const tratamientoObj = inferirTratamiento(expediente.nombre);
   const cedulaFormateada = formatearCedula(expediente.cedula);
-  const fechaIngresoFormateada = formatearFecha(expediente.fecha_ingreso);
+  const fechaIngresoFormateada = formatearFechaEspanol(expediente.fecha_ingreso);
   const cargoStr = (expediente.cargo || 'Trabajador/a').toUpperCase();
 
-  // Texto del cuerpo
   const parrafo1 = `La FUNDACIÓN AMIGA (FUNDAMIGA) se permite certificar que ${tratamientoObj.tratamiento} ${expediente.nombre.toUpperCase()}, identificado(a) con Cédula de Ciudadanía N° ${cedulaFormateada}, se encuentra vinculado(a) laboralmente con nuestra institución desempeñando el cargo de ${cargoStr}, desde el ${fechaIngresoFormateada}.`;
 
   const parrafo2 = `Durante el tiempo de vinculación, ${tratamientoObj.tratamiento} ${expediente.nombre.toUpperCase()} ha demostrado un excelente desempeño profesional, alto sentido de responsabilidad, compromiso ético y un impecable trato con los usuarios y beneficiarios de la fundación.`;
 
-  const parrafo3 = `Se expide la presente certificación a solicitud del interesado(a), a los ${hoy.getDate()} días del mes de ${meses[hoy.getMonth()]} de ${hoy.getFullYear()}.`;
+  const parrafo3 = `Se expide la presente certificación a solicitud del interesado(a), a los ${numeroATexto(hoy.getDate())} (${hoy.getDate()}) días del mes de ${meses[hoy.getMonth()]} de ${hoy.getFullYear()}.`;
 
-  // Función helper para envolver texto
   const wrapText = (text: string, maxWidth: number, fontSize: number, font: any) => {
     const words = text.split(' ');
     const lines: string[] = [];
@@ -138,14 +195,13 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
       });
       yPos -= 16;
     }
-    yPos -= 15; // Espacio entre párrafos
+    yPos -= 15;
   };
 
   drawParagraph(parrafo1);
   drawParagraph(parrafo2);
   drawParagraph(parrafo3);
 
-  // Firma
   yPos -= 40;
   page.drawLine({
     start: { x: margin, y: yPos },
@@ -175,7 +231,6 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
   const pdfBytes = await pdfDoc.save();
   return new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
 }
-
 
 export function descargarBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

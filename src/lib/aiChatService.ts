@@ -3,7 +3,7 @@ import { DOCUMENTOS_ESENCIALES, Expediente } from '@/types';
 
 export interface ChatAction {
   label: string;
-  tipo: 'NAVEGAR' | 'GENERAR_CERTIFICADO' | 'MOVER_REMESA' | 'MARCAR_RETIRADO';
+  tipo: 'NAVEGAR' | 'GENERAR_CERTIFICADO' | 'GENERAR_DOCX' | 'MOVER_REMESA' | 'MARCAR_RETIRADO';
   expediente: Expediente;
   payload?: any;
 }
@@ -63,15 +63,14 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
   if (esSaludo || q === 'hola') {
     return {
       text: `👋 **¡Hola! Soy tu Asistente Fundamiga.**\n\n` +
-        `Puedo buscar trabajadores, abrir sus expedientes, generar **Certificados Laborales en PDF** o cambiar sus estados.\n\n` +
+        `Puedo buscar trabajadores, abrir sus expedientes, generar **Cartas de Recomendación en Word (.DOCX)** con tu plantilla oficial o **Certificados Laborales en PDF**.\n\n` +
         `Prueba escribiendo un nombre (ej: *diana arias*) o selecciona una consulta rápida:`
     };
   }
 
   // ── INTENTO 1: SOLICITUD DE GENERACIÓN DE CERTIFICADO / CARTA LABORAL ─────
   if (q.includes('certificado') || q.includes('carta') || q.includes('recomendacion') || q.includes('constancia')) {
-    // Buscar la persona en la consulta
-    const palabrasIgnoradasCert = new Set(['genera', 'generar', 'dame', 'haz', 'hacer', 'una', 'un', 'carta', 'certificado', 'laboral', 'de', 'recomendacion', 'para', 'constancia', 'expedir']);
+    const palabrasIgnoradasCert = new Set(['genera', 'generar', 'generame', 'dame', 'haz', 'hacer', 'una', 'un', 'carta', 'certificado', 'laboral', 'de', 'recomendacion', 'para', 'constancia', 'expedir']);
     const tokensCert = q.split(/\s+/).filter(w => w.length >= 2 && !palabrasIgnoradasCert.has(w));
 
     if (tokensCert.length > 0) {
@@ -84,11 +83,16 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
       if (resAnd && resAnd.length > 0) {
         const exp = resAnd[0];
         return {
-          text: `📄 **Generador de Certificado y Carta de Recomendación**\n\nHe encontrado a **${exp.nombre}** (CC: ${exp.cedula}). Haz clic en el botón a continuación para descargar su documento oficial en PDF con membrete de Fundamiga:`,
+          text: `📄 **Generador de Carta de Recomendación y Certificado**\n\nHe encontrado a **${exp.nombre}** (CC: ${exp.cedula}). Puedes generar su carta con la plantilla Word oficial o descargar el PDF:`,
           expedientesEncontrados: [exp],
           acciones: [
             {
-              label: '📥 Descargar Carta Laboral / Recomendación (PDF)',
+              label: '📝 Generar Carta Recomendación (Word .DOCX Oficial)',
+              tipo: 'GENERAR_DOCX',
+              expediente: exp
+            },
+            {
+              label: '📑 Generar Certificado Laboral (PDF)',
               tipo: 'GENERAR_CERTIFICADO',
               expediente: exp
             },
@@ -236,14 +240,20 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
         }
         respuesta += `\n`;
 
+        const primerNombre = p.nombre.split(' ')[0];
         accionesList.push(
           {
-            label: `👁️ Abrir Expediente: ${p.nombre.split(' ')[0]}`,
+            label: `👁️ Abrir Expediente: ${primerNombre}`,
             tipo: 'NAVEGAR',
             expediente: p
           },
           {
-            label: `📄 Generar Carta Laboral (PDF)`,
+            label: `📝 Carta Recomendación (Word .DOCX Oficial): ${primerNombre}`,
+            tipo: 'GENERAR_DOCX',
+            expediente: p
+          },
+          {
+            label: `📑 Certificado Laboral (PDF): ${primerNombre}`,
             tipo: 'GENERAR_CERTIFICADO',
             expediente: p
           }
