@@ -1,10 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Bot, User, RefreshCw, MessageSquare, ChevronDown } from 'lucide-react';
-import { processAIChatMessage, ChatMessage } from '@/lib/aiChatService';
+import { useRouter } from 'next/navigation';
+import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, CheckCircle2 } from 'lucide-react';
+import { processAIChatMessage, ChatMessage, ChatAction } from '@/lib/aiChatService';
+import { generarCartaRecomendacionPDF, descargarBlob } from '@/lib/documentGenerator';
 
 export default function AIChatWidget() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -16,6 +19,7 @@ export default function AIChatWidget() {
   ]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -45,12 +49,14 @@ export default function AIChatWidget() {
     setIsTyping(true);
 
     try {
-      const responseText = await processAIChatMessage(query);
+      const responseObj = await processAIChatMessage(query);
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'assistant',
-        text: responseText,
-        timestamp: new Date()
+        text: responseObj.text,
+        timestamp: new Date(),
+        expedientesEncontrados: responseObj.expedientesEncontrados,
+        acciones: responseObj.acciones
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (e) {
@@ -68,11 +74,27 @@ export default function AIChatWidget() {
     }
   };
 
-  // Formateador simple de negritas e ítems
+  const handleExecuteAction = async (action: ChatAction) => {
+    if (action.tipo === 'NAVEGAR' && action.expediente?.id) {
+      setIsOpen(false);
+      router.push(`/expediente/${action.expediente.id}`);
+    } else if (action.tipo === 'GENERAR_CERTIFICADO' && action.expediente) {
+      setGeneratingPdfId(action.expediente.id);
+      try {
+        const blob = await generarCartaRecomendacionPDF(action.expediente);
+        const nombreLimpio = action.expediente.nombre.replace(/[^a-zA-Z0-9]/g, '_');
+        descargarBlob(blob, `Carta_Recomendacion_${nombreLimpio}.pdf`);
+      } catch (err) {
+        console.error('Error generando PDF:', err);
+      } finally {
+        setGeneratingPdfId(null);
+      }
+    }
+  };
+
   const renderFormattedText = (text: string) => {
     const lines = text.split('\n');
     return lines.map((line, idx) => {
-      // Reemplazar **texto** por <strong>
       const parts = line.split(/(\*\*.*?\*\*)/g);
       const formattedLine = parts.map((part, pIdx) => {
         if (part.startsWith('**') && part.endsWith('**')) {
@@ -94,7 +116,7 @@ export default function AIChatWidget() {
     <div className="fixed bottom-6 right-6 z-[9990] flex flex-col items-end pointer-events-none">
       {/* Ventana de Chat */}
       {isOpen && (
-        <div className="pointer-events-auto mb-3 w-[360px] sm:w-[400px] h-[520px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
+        <div className="pointer-events-auto mb-3 w-[360px] sm:w-[420px] h-[540px] max-h-[82vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
           {/* Header */}
           <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-4 text-white flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
@@ -106,7 +128,7 @@ export default function AIChatWidget() {
                   Asistente Fundamiga
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 </h3>
-                <p className="text-[11px] text-indigo-100">Consultas rápidas e IA</p>
+                <p className="text-[11px] text-indigo-100">Acciones directas y Certificados PDF</p>
               </div>
             </div>
 
@@ -154,13 +176,49 @@ export default function AIChatWidget() {
                 )}
 
                 <div
-                  className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                  className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
                     msg.sender === 'user'
                       ? 'bg-indigo-600 text-white rounded-br-none'
                       : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
                   }`}
                 >
                   {renderFormattedText(msg.text)}
+
+                  {/* Renderizar Botones de Acción si existen */}
+                  {msg.acciones && msg.acciones.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
+                      {msg.acciones.map((act, aIdx) => (
+                        <button
+                          key={aIdx}
+                          onClick={() => handleExecuteAction(act)}
+                          disabled={generatingPdfId === act.expediente?.id}
+                          className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                            act.tipo === 'GENERAR_CERTIFICADO'
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                          }`}
+                        >
+                          {act.tipo === 'GENERAR_CERTIFICADO' ? (
+                            generatingPdfId === act.expediente?.id ? (
+                              <>
+                                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                Generando PDF...
+                              </>
+                            ) : (
+                              <>
+                                <Download size={13} /> {act.label}
+                              </>
+                            )
+                          ) : (
+                            <>
+                              <Eye size={13} /> {act.label}
+                            </>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <div
                     className={`text-[9px] mt-1 text-right font-medium ${
                       msg.sender === 'user' ? 'text-indigo-200' : 'text-slate-400'
@@ -206,7 +264,7 @@ export default function AIChatWidget() {
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Escribe un nombre, cédula o pregunta..."
+              placeholder="Escribe un nombre o 'Genera carta de recomendación'..."
               className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
