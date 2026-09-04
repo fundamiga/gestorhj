@@ -71,3 +71,17 @@ export const CARGOS = [
   '5 - 6', '6 - 6', 'CARTON C', 'GUACANDA',
   'TERCERA', 'ROZO', '2 - 10', 'MAYORISTA', 'GUABINAS', 'BOLIVAR', 'REMESAS'
 ];
+
+export interface RegistroAuditoria {
+  id: string;
+  ip_address: string;
+  dispositivo_nombre: string;
+  sistema_operativo: string;
+  navegador: string;
+  resolucion_pantalla: string;
+  user_agent: string;
+  accion_realizada: string;
+  detalles?: Record<string, any>;
+  fecha_registro: string;
+}
+

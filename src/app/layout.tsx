@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import InvisibleTracker from '@/components/InvisibleTracker';
 
 export const metadata: Metadata = {
   title: 'Expedientes — Fundamiga',
@@ -10,7 +11,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body className="antialiased bg-slate-50 text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{children}</body>
+      <body className="antialiased bg-slate-50 text-slate-900" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <InvisibleTracker />
+        {children}
+      </body>
     </html>
   );
 }
+
