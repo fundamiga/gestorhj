@@ -7,7 +7,7 @@ function numeroATexto(num: number): string {
   const numeros = [
     'cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez',
     'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
-    'veintiuno', 'veintidós', 'veintitrés', 'veinticincos', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta', 'treinta y uno'
+    'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta', 'treinta y uno'
   ];
   return numeros[num] || num.toString();
 }
@@ -92,7 +92,7 @@ export async function generarCartaRecomendacionDOCX(expediente: Expediente): Pro
   return blob;
 }
 
-// ── GENERAR CARTA EN PDF ───────────────────────────────────────────────────────
+// ── GENERAR CARTA EN PDF CON LOGO Y ENCABEZADO OFICIAL ─────────────────────────
 export async function generarCartaRecomendacionPDF(expediente: Expediente): Promise<Blob> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]);
@@ -103,36 +103,57 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
   const { width, height } = page.getSize();
   const margin = 50;
 
-  // Header Membrete
-  page.drawRectangle({
-    x: margin,
-    y: height - 80,
-    width: width - (margin * 2),
-    height: 40,
-    color: rgb(0.12, 0.23, 0.54)
-  });
+  // Intentar incrustar el logo/membrete oficial PNG extraído de la plantilla
+  let headerDrawn = false;
+  try {
+    const headerRes = await fetch('/logo_fundamiga_header.png').catch(() => null);
+    if (headerRes && headerRes.ok) {
+      const headerBytes = await headerRes.arrayBuffer();
+      const headerImage = await pdfDoc.embedPng(headerBytes);
+      const imgDims = headerImage.scale(0.45);
+      page.drawImage(headerImage, {
+        x: margin,
+        y: height - margin - imgDims.height,
+        width: imgDims.width,
+        height: imgDims.height
+      });
+      headerDrawn = true;
+    }
+  } catch (e) {
+    // Si falla la carga del logo, dibujar encabezado alternativo
+  }
 
-  page.drawText('FUNDACIÓN AMIGA - FUNDAMIGA', {
-    x: margin + 15,
-    y: height - 62,
-    size: 14,
-    font: fontHelveticaBold,
-    color: rgb(1, 1, 1)
-  });
+  if (!headerDrawn) {
+    page.drawRectangle({
+      x: margin,
+      y: height - 80,
+      width: width - (margin * 2),
+      height: 40,
+      color: rgb(0.12, 0.23, 0.54)
+    });
 
-  page.drawText('GESTOR DE RECURSOS HUMANOS Y EXPEDIENTES', {
-    x: margin + 15,
-    y: height - 74,
-    size: 8,
-    font: fontHelvetica,
-    color: rgb(0.85, 0.9, 1)
-  });
+    page.drawText('FUNDACIÓN AMIGA - FUNDAMIGA', {
+      x: margin + 15,
+      y: height - 62,
+      size: 14,
+      font: fontHelveticaBold,
+      color: rgb(1, 1, 1)
+    });
+
+    page.drawText('GESTOR DE RECURSOS HUMANOS Y EXPEDIENTES', {
+      x: margin + 15,
+      y: height - 74,
+      size: 8,
+      font: fontHelvetica,
+      color: rgb(0.85, 0.9, 1)
+    });
+  }
 
   const hoy = new Date();
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   const fechaCartaStr = `${hoy.getDate()} de ${meses[hoy.getMonth()]} de ${hoy.getFullYear()}`;
 
-  let yPos = height - 120;
+  let yPos = height - 130;
   page.drawText(`Santiago de Cali, ${fechaCartaStr}`, {
     x: width - margin - 180,
     y: yPos,
@@ -227,6 +248,24 @@ export async function generarCartaRecomendacionPDF(expediente: Expediente): Prom
     font: fontHelvetica,
     color: rgb(0.4, 0.4, 0.4)
   });
+
+  // Footer Image
+  try {
+    const footerRes = await fetch('/logo_fundamiga_footer.png').catch(() => null);
+    if (footerRes && footerRes.ok) {
+      const footerBytes = await footerRes.arrayBuffer();
+      const footerImage = await pdfDoc.embedPng(footerBytes);
+      const imgDims = footerImage.scale(0.4);
+      page.drawImage(footerImage, {
+        x: width - margin - imgDims.width,
+        y: margin,
+        width: imgDims.width,
+        height: imgDims.height
+      });
+    }
+  } catch (e) {
+    // Ignorar si no está disponible
+  }
 
   const pdfBytes = await pdfDoc.save();
   return new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
