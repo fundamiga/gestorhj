@@ -77,7 +77,19 @@ export default function AIChatWidget() {
   // Autocompletado: busca trabajadores mientras se escribe
   const handleInputChange = async (value: string) => {
     setInputText(value);
-    if (value.length >= 2) {
+
+    // Detectar si el texto termina con @ o tiene @ seguido de texto
+    const atMatch = value.match(/@([^\s]*)$/);
+
+    if (atMatch !== null) {
+      // Si escribió solo @ o @texto → buscar por lo que sigue al @
+      const queryAfterAt = atMatch[1]; // puede ser vacío si es solo "@"
+      const results = queryAfterAt.length === 0
+        ? await buscarTrabajadoresGlobales('', 8).then(() => obtenerTrabajadoresUnificados()).then(all => all.slice(0, 8))
+        : await buscarTrabajadoresGlobales(queryAfterAt, 8);
+      setSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    } else if (value.length >= 2) {
       const results = await buscarTrabajadoresGlobales(value, 6);
       setSuggestions(results);
       setShowSuggestions(results.length > 0);
@@ -89,9 +101,20 @@ export default function AIChatWidget() {
 
   // Pegar contacto seleccionado en el input
   const handleSelectContact = (t: TrabajadorItem) => {
-    const texto = attachedFile
-      ? `Lleva este archivo a ${t.nombre} (CC: ${t.cedula})`
-      : `Dame los datos de ${t.nombre} (CC: ${t.cedula})`;
+    const atMatch = inputText.match(/@([^\s]*)$/);
+
+    let texto: string;
+    if (atMatch) {
+      // Reemplazar el @... por el nombre + cédula manteniendo el resto del texto
+      const beforeAt = inputText.slice(0, inputText.lastIndexOf('@'));
+      texto = `${beforeAt}${t.nombre} (CC: ${t.cedula})`;
+    } else {
+      // Sin @: usar plantilla completa
+      texto = attachedFile
+        ? `Lleva este archivo a ${t.nombre} (CC: ${t.cedula})`
+        : `Dame los datos de ${t.nombre} (CC: ${t.cedula})`;
+    }
+
     setInputText(texto);
     setSuggestions([]);
     setShowSuggestions(false);
