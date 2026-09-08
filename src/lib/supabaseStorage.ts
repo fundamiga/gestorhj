@@ -1,9 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_STORAGE_URL = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_URL || '';
-const SUPABASE_STORAGE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_ANON_KEY || '';
+const SUPABASE_STORAGE_URL = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_URL || 'https://gimldpldmkqvgizkczrs.supabase.co';
+const SUPABASE_STORAGE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpbWxkcGxkbWtxdmdpemtjenJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTU2ODMsImV4cCI6MjA5MzQ3MTY4M30.mbglIzc7rGPS37A5AgBr1soYNdOK7bXr-vfJUdQBx4s';
 
-// Solo crear el cliente si las variables existen para evitar el error de "supabaseUrl is required"
 export const supabaseStorage = (SUPABASE_STORAGE_URL && SUPABASE_STORAGE_ANON_KEY) 
   ? createClient(SUPABASE_STORAGE_URL, SUPABASE_STORAGE_ANON_KEY)
   : null as any;
