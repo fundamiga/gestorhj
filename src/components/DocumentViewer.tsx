@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { X, Download, ExternalLink, Printer, FileText } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Download, ExternalLink, Printer, FileText, AlertCircle } from 'lucide-react';
 
 interface DocumentViewerProps {
   url: string;
@@ -11,10 +11,14 @@ interface DocumentViewerProps {
 }
 
 export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onClose }: DocumentViewerProps) {
+  const [iframeError, setIframeError] = useState(false);
+
   const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || /\.(jpg|jpeg|png|webp|gif)$/i.test(nombreArchivo);
   const isPDF = url.toLowerCase().includes('.pdf') || nombreArchivo.toLowerCase().endsWith('.pdf');
 
-  // Intentar manejar la impresión
+  // Para PDFs: usar Google Docs Viewer que puede renderizar PDFs de URLs externas
+  const googleDocsUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+
   const handlePrint = () => {
     const printWindow = window.open(url, '_blank');
     if (printWindow) {
@@ -91,23 +95,58 @@ export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onCl
               alt={nombreArchivo} 
               className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
             />
-          ) : isPDF ? (
-            <iframe 
-              src={`${url}#toolbar=1&navpanes=0&scrollbar=1`} 
+          ) : isPDF && !iframeError ? (
+            <iframe
+              src={googleDocsUrl}
               className="w-full h-full rounded-lg border border-slate-200 shadow-sm"
               title={nombreArchivo}
+              onLoad={(e) => {
+                // Si el iframe carga vacío (error de Google Docs Viewer), mostrar fallback
+                try {
+                  const iframe = e.currentTarget as HTMLIFrameElement;
+                  if (iframe.contentDocument?.body?.innerHTML === '') {
+                    setIframeError(true);
+                  }
+                } catch {
+                  // CORS: no podemos leer el contenido, asumimos que cargó bien
+                }
+              }}
             />
           ) : (
-            <div className="text-center p-8 bg-white rounded-3xl border border-slate-100 shadow-sm max-w-sm">
-              <FileText size={48} className="text-slate-200 mx-auto mb-4" />
-              <h4 className="font-black text-slate-800 mb-2">Vista previa no disponible</h4>
-              <p className="text-sm text-slate-500 mb-6 font-medium">Este tipo de archivo no se puede previsualizar directamente en el navegador.</p>
-              <a 
-                href={url} 
-                className="inline-flex items-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-emerald-700 shadow-sm transition-all"
-              >
-                <Download size={16} /> Descargar para ver
-              </a>
+            <div className="text-center p-8 bg-white rounded-3xl border border-slate-100 shadow-sm max-w-md">
+              {isPDF ? (
+                <>
+                  <AlertCircle size={48} className="text-amber-400 mx-auto mb-4" />
+                  <h4 className="font-black text-slate-800 mb-2">No se puede previsualizar</h4>
+                  <p className="text-sm text-slate-500 mb-6 font-medium">
+                    El servidor no permite mostrar este archivo en el visor interno. 
+                    Puedes descargarlo o abrirlo directamente en una nueva pestaña.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <FileText size={48} className="text-slate-200 mx-auto mb-4" />
+                  <h4 className="font-black text-slate-800 mb-2">Vista previa no disponible</h4>
+                  <p className="text-sm text-slate-500 mb-6 font-medium">Este tipo de archivo no se puede previsualizar directamente en el navegador.</p>
+                </>
+              )}
+              <div className="flex gap-3 justify-center flex-wrap">
+                <a 
+                  href={url} 
+                  download={nombreArchivo}
+                  className="inline-flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-black text-sm hover:bg-emerald-700 shadow-sm transition-all"
+                >
+                  <Download size={15} /> Descargar
+                </a>
+                <a 
+                  href={url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-black text-sm hover:bg-indigo-700 shadow-sm transition-all"
+                >
+                  <ExternalLink size={15} /> Abrir en nueva pestaña
+                </a>
+              </div>
             </div>
           )}
         </div>
