@@ -1,10 +1,10 @@
 import { supabase } from '@/lib/supabase';
-import { DOCUMENTOS_ESENCIALES, Expediente } from '@/types';
+import { DOCUMENTOS_ESENCIALES, TIPOS_DOCUMENTO, Expediente } from '@/types';
 
 export interface ChatAction {
   label: string;
-  tipo: 'NAVEGAR' | 'GENERAR_CERTIFICADO' | 'GENERAR_DOCX' | 'MOVER_REMESA' | 'MARCAR_RETIRADO';
-  expediente: Expediente;
+  tipo: 'NAVEGAR' | 'GENERAR_CERTIFICADO' | 'GENERAR_DOCX' | 'MOVER_REMESA' | 'MARCAR_RETIRADO' | 'SELECCIONAR_CATEGORIA' | 'CONFIRMAR_SUBIDA' | 'VER_DOCUMENTO';
+  expediente?: Expediente;
   payload?: any;
 }
 
@@ -21,11 +21,42 @@ export interface ChatMessage {
   timestamp: Date;
   expedientesEncontrados?: Expediente[];
   acciones?: ChatAction[];
+  archivoAdjunto?: {
+    nombre: string;
+    tamaño: string;
+  };
 }
 
-export async function processAIChatMessage(message: string): Promise<ChatResponse> {
+export function detectarCategoria(texto: string): string | null {
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (t.includes('cedula') || t.includes('cc') || t.includes('identidad')) return 'Cédula de Ciudadanía';
+  if (t.includes('hoja de vida') || t.includes('hv') || t.includes('curriculum')) return 'Hoja de Vida';
+  if (t.includes('contrato')) return 'Contrato';
+  if (t.includes('eps')) return 'Certificado EPS';
+  if (t.includes('arl')) return 'Afiliación ARL';
+  if (t.includes('policia')) return 'Antecedentes Policía';
+  if (t.includes('contraloria')) return 'Antecedentes Contraloría';
+  if (t.includes('procuraduria')) return 'Antecedentes Procuraduría';
+  if (t.includes('antecedente')) return 'Antecedentes Policía';
+  if (t.includes('rut')) return 'RUT';
+  if (t.includes('firma')) return 'Firma';
+  if (t.includes('cuenta') || t.includes('bancari') || t.includes('bancario')) return 'Certificado de cuenta';
+  if (t.includes('ingreso')) return 'Solicitud de Ingreso';
+  if (t.includes('retiro')) return 'Solicitud de Retiro';
+  return null;
+}
+
+export async function processAIChatMessage(
+  message: string,
+  attachedFile?: { name: string; size: number } | null
+): Promise<ChatResponse> {
   const cleanMsg = message.trim();
-  if (!cleanMsg) return { text: 'Por favor escribe una consulta válida.' };
+  if (!cleanMsg && !attachedFile) return { text: 'Por favor escribe una consulta o adjunta un archivo.' };
+
+  // Si hay un archivo adjunto o la intención es subir/llevar un archivo
+  if (attachedFile || cleanMsg.toLowerCase().includes('lleva') || cleanMsg.toLowerCase().includes('sube') || cleanMsg.toLowerCase().includes('archivo')) {
+    return await processFileUploadIntent(cleanMsg, attachedFile);
+  }
 
   // 1. Intentar conectar con el Asistente Fundamiga Local (Ollama en puerto 3500)
   try {
@@ -55,6 +86,114 @@ export async function processAIChatMessage(message: string): Promise<ChatRespons
   return await processSupabaseQuery(cleanMsg);
 }
 
+// ── PROCESAR INTENCIÓN DE SUBIDA DE ARCHIVO A UN EXPEDIENTE ──────────────────
+async function processFileUploadIntent(
+  query: string,
+  attachedFile?: { name: string; size: number } | null
+): Promise<ChatResponse> {
+  const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const nombreArchivo = attachedFile ? attachedFile.name : 'este archivo';
+
+  // 1. Detectar si mencionó categoría en el texto
+  const categoriaDetectada = detectarCategoria(q) || (attachedFile ? detectarCategoria(attachedFile.name) : null);
+
+  // 2. Extraer términos para buscar persona
+  const palabrasIgnoradas = new Set([
+    'lleva', 'llevale', 'sube', 'subelo', 'subele', 'guarda', 'guardalo', 'asigna', 'asignalo',
+    'este', 'esta', 'estos', 'archivo', 'documento', 'foto', 'pdf', 'a', 'donde', 'de', 'para',
+    'el', 'la', 'los', 'las', 'por', 'favor', 'como', 'su', 'cedula', 'hoja', 'vida', 'contrato',
+    'eps', 'arl', 'antecedentes', 'rut', 'firma', 'cuenta'
+  ]);
+
+  const tokens = q
+    .split(/\s+/)
+    .filter(palabra => palabra.length >= 2 && !palabrasIgnoradas.has(palabra));
+
+  let personaEncontrada: Expediente | null = null;
+
+  if (tokens.length > 0) {
+    let queryAnd = supabase.from('expedientes').select('*');
+    for (const t of tokens) {
+      queryAnd = queryAnd.ilike('nombre', `%${t}%`);
+    }
+    const { data: resAnd } = await queryAnd.limit(1);
+
+    if (resAnd && resAnd.length > 0) {
+      personaEncontrada = resAnd[0];
+    } else {
+      // Intentar por cédula si hay números
+      const numMatch = q.match(/\d{5,}/);
+      if (numMatch) {
+        const { data: resCed } = await supabase.from('expedientes').select('*').ilike('cedula', `%${numMatch[0]}%`).limit(1);
+        if (resCed && resCed.length > 0) personaEncontrada = resCed[0];
+      }
+    }
+  }
+
+  // CASO A: Se encontró la persona
+  if (personaEncontrada) {
+    const p = personaEncontrada;
+
+    // Si ya detectó la categoría:
+    if (categoriaDetectada) {
+      return {
+        text: `📎 **Archivo**: \`${nombreArchivo}\`\n\n` +
+          `Identifiqué el expediente de **${p.nombre}** (CC: ${p.cedula}) y la categoría **${categoriaDetectada}**.\n\n` +
+          `¿Deseas confirmar la subida de este documento a su expediente?`,
+        expedientesEncontrados: [p],
+        acciones: [
+          {
+            label: `🚀 Confirmar y Subir como ${categoriaDetectada}`,
+            tipo: 'CONFIRMAR_SUBIDA',
+            expediente: p,
+            payload: { categoria: categoriaDetectada, expedienteId: p.id, expedienteNombre: p.nombre }
+          },
+          {
+            label: `✏️ Elegir otra categoría`,
+            tipo: 'SELECCIONAR_CATEGORIA',
+            expediente: p,
+            payload: { expedienteId: p.id, expedienteNombre: p.nombre }
+          }
+        ]
+      };
+    }
+
+    // Si no detectó la categoría, mostrar las categorías disponibles como botones:
+    const categoriasPrincipales = [
+      'Cédula de Ciudadanía',
+      'Hoja de Vida',
+      'Contrato',
+      'Certificado EPS',
+      'Afiliación ARL',
+      'Antecedentes Policía',
+      'Certificado de cuenta',
+      'Otro'
+    ];
+
+    const accionesCategorias: ChatAction[] = categoriasPrincipales.map(cat => ({
+      label: `${cat === 'Cédula de Ciudadanía' ? '📄' : cat === 'Hoja de Vida' ? '📋' : cat === 'Contrato' ? '📑' : cat === 'Certificado EPS' ? '🏥' : cat === 'Afiliación ARL' ? '🛡️' : '📁'} ${cat}`,
+      tipo: 'CONFIRMAR_SUBIDA',
+      expediente: p,
+      payload: { categoria: cat, expedienteId: p.id, expedienteNombre: p.nombre }
+    }));
+
+    return {
+      text: `📎 **Archivo**: \`${nombreArchivo}\`\n\n` +
+        `He identificado a **${p.nombre}** (CC: ${p.cedula}).\n\n` +
+        `**¿Qué tipo o categoría de documento es este archivo?** (Selecciona una opción a continuación):`,
+      expedientesEncontrados: [p],
+      acciones: accionesCategorias
+    };
+  }
+
+  // CASO B: No se especificó o no se encontró la persona
+  return {
+    text: `📎 **Archivo recibido**: \`${nombreArchivo}\`\n\n` +
+      `¿A qué trabajador o persona deseas asignarle este archivo?\n\n` +
+      `Por favor escribe su **nombre** o **cédula** (ej: *"Súbelo a Diana Arias"* o *"Para Michael Guevara"*).`
+  };
+}
+
 async function processSupabaseQuery(query: string): Promise<ChatResponse> {
   const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
@@ -63,8 +202,8 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
   if (esSaludo || q === 'hola') {
     return {
       text: `👋 **¡Hola! Soy tu Asistente Fundamiga.**\n\n` +
-        `Puedo buscar trabajadores, abrir sus expedientes, generar **Cartas de Recomendación en Word (.DOCX)** con tu plantilla oficial o **Certificados Laborales en PDF**.\n\n` +
-        `Prueba escribiendo un nombre (ej: *diana arias*) o selecciona una consulta rápida:`
+        `Puedo buscar trabajadores, abrir expedientes, **recibir y subir documentos** con el botón de clip 📎 o generar **Cartas de Recomendación (.DOCX)** y **PDFs**.\n\n` +
+        `Prueba escribiendo un nombre (ej: *diana arias*), subiendo un archivo o seleccionando una consulta rápida:`
     };
   }
 
@@ -87,12 +226,12 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
           expedientesEncontrados: [exp],
           acciones: [
             {
-              label: '📝 Generar Carta Recomendación (Word .DOCX Oficial)',
+              label: '📝 Carta Recomendación (Word .DOCX Oficial)',
               tipo: 'GENERAR_DOCX',
               expediente: exp
             },
             {
-              label: '📑 Generar Certificado Laboral (PDF)',
+              label: '📑 Certificado Laboral (PDF)',
               tipo: 'GENERAR_CERTIFICADO',
               expediente: exp
             },
@@ -268,7 +407,6 @@ async function processSupabaseQuery(query: string): Promise<ChatResponse> {
         expedientesEncontrados: resultados,
         acciones: accionesList
       };
-
     }
   }
 

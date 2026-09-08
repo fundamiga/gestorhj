@@ -2,9 +2,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, Paperclip, CheckCircle2, UploadCloud, AlertCircle } from 'lucide-react';
 import { processAIChatMessage, ChatMessage, ChatAction } from '@/lib/aiChatService';
 import { generarCartaRecomendacionPDF, generarCartaRecomendacionDOCX, descargarBlob } from '@/lib/documentGenerator';
+import { subirArchivoAExpediente } from '@/lib/chatDocumentUpload';
 
 export default function AIChatWidget() {
   const router = useRouter();
@@ -22,6 +23,13 @@ export default function AIChatWidget() {
   const [isTyping, setIsTyping] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
 
+  // Estados para subida de archivos
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -49,17 +57,30 @@ export default function AIChatWidget() {
     if (isOpen) {
       scrollToBottom();
     }
-  }, [messages, isOpen]);
+  }, [messages, isOpen, isTyping, isUploading]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAttachedFile(e.target.files[0]);
+    }
+  };
 
   const handleSendMessage = async (textToSend?: string) => {
-    const query = textToSend || inputText;
-    if (!query.trim() || isTyping) return;
+    const query = (textToSend || inputText).trim();
+    if (!query && !attachedFile) return;
+    if (isTyping || isUploading) return;
+
+    const currentFile = attachedFile;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
-      text: query,
-      timestamp: new Date()
+      text: query || `Adjunto: ${currentFile?.name}`,
+      timestamp: new Date(),
+      archivoAdjunto: currentFile ? {
+        nombre: currentFile.name,
+        tamaño: `${(currentFile.size / 1024).toFixed(0)} KB`
+      } : undefined
     };
 
     setMessages(prev => [...prev, userMsg]);
@@ -67,7 +88,9 @@ export default function AIChatWidget() {
     setIsTyping(true);
 
     try {
-      const responseObj = await processAIChatMessage(query);
+      const filePayload = currentFile ? { name: currentFile.name, size: currentFile.size } : null;
+      const responseObj = await processAIChatMessage(query, filePayload);
+
       const assistantMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'assistant',
@@ -96,6 +119,8 @@ export default function AIChatWidget() {
     if (action.tipo === 'NAVEGAR' && action.expediente?.id) {
       setIsOpen(false);
       router.push(`/expediente/${action.expediente.id}`);
+    } else if (action.tipo === 'VER_DOCUMENTO' && action.payload?.url) {
+      window.open(action.payload.url, '_blank');
     } else if (action.tipo === 'GENERAR_DOCX' && action.expediente) {
       const keyId = `${action.expediente.id}-docx`;
       setGeneratingId(keyId);
@@ -120,16 +145,125 @@ export default function AIChatWidget() {
       } finally {
         setGeneratingId(null);
       }
+    } else if (action.tipo === 'SELECCIONAR_CATEGORIA' && action.payload) {
+      // Mostrar lista de categorías para elegir
+      const categoriasPrincipales = [
+        'Cédula de Ciudadanía',
+        'Hoja de Vida',
+        'Contrato',
+        'Certificado EPS',
+        'Afiliación ARL',
+        'Antecedentes Policía',
+        'Certificado de cuenta',
+        'Otro'
+      ];
+
+      const accionesCategorias: ChatAction[] = categoriasPrincipales.map(cat => ({
+        label: `${cat === 'Cédula de Ciudadanía' ? '📄' : cat === 'Hoja de Vida' ? '📋' : cat === 'Contrato' ? '📑' : cat === 'Certificado EPS' ? '🏥' : cat === 'Afiliación ARL' ? '🛡️' : '📁'} ${cat}`,
+        tipo: 'CONFIRMAR_SUBIDA',
+        expediente: action.expediente,
+        payload: { categoria: cat, expedienteId: action.payload.expedienteId, expedienteNombre: action.payload.expedienteNombre }
+      }));
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          sender: 'assistant',
+          text: `Selecciona la categoría para el archivo de **${action.payload.expedienteNombre}**:`,
+          timestamp: new Date(),
+          acciones: accionesCategorias
+        }
+      ]);
+    } else if (action.tipo === 'CONFIRMAR_SUBIDA' && action.payload) {
+      if (!attachedFile) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            sender: 'assistant',
+            text: '⚠️ Por favor adjunta el archivo con el botón de clip 📎 para poder subirlo.',
+            timestamp: new Date()
+          }
+        ]);
+        return;
+      }
+
+      const { expedienteId, expedienteNombre, categoria } = action.payload;
+      setIsUploading(true);
+      setUploadProgressText(`Subiendo "${attachedFile.name}" como ${categoria}...`);
+
+      try {
+        const uploadResult = await subirArchivoAExpediente(attachedFile, expedienteId, categoria);
+
+        if (uploadResult.ok && uploadResult.doc) {
+          const docGuardado = uploadResult.doc;
+          setAttachedFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              sender: 'assistant',
+              text: `✅ **¡Documento subido y registrado con éxito!**\n\n` +
+                `• **Archivo**: \`${docGuardado.nombre_archivo}\`\n` +
+                `• **Categoría**: **${categoria}**\n` +
+                `• **Expediente**: **${expedienteNombre}**\n\n` +
+                `Ya se encuentra vinculado formalmente en su expediente.`,
+              timestamp: new Date(),
+              acciones: [
+                {
+                  label: '👁️ Ver Documento Subido',
+                  tipo: 'VER_DOCUMENTO',
+                  payload: { url: docGuardado.url }
+                },
+                {
+                  label: `👤 Abrir Expediente de ${expedienteNombre.split(' ')[0]}`,
+                  tipo: 'NAVEGAR',
+                  expediente: action.expediente
+                }
+              ]
+            }
+          ]);
+        } else {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              sender: 'assistant',
+              text: `❌ No se pudo subir el archivo: ${uploadResult.error || 'Error en almacenamiento'}`,
+              timestamp: new Date()
+            }
+          ]);
+        }
+      } catch (err: any) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            sender: 'assistant',
+            text: `❌ Ocurrió un error inesperado al subir el archivo: ${err.message}`,
+            timestamp: new Date()
+          }
+        ]);
+      } finally {
+        setIsUploading(false);
+        setUploadProgressText('');
+      }
     }
   };
 
   const renderFormattedText = (text: string) => {
     const lines = text.split('\n');
     return lines.map((line, idx) => {
-      const parts = line.split(/(\*\*.*?\*\*)/g);
+      const parts = line.split(/(\*\*.*?\*\*|`.*?`)/g);
       const formattedLine = parts.map((part, pIdx) => {
         if (part.startsWith('**') && part.endsWith('**')) {
           return <strong key={pIdx} className="font-bold">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('`') && part.endsWith('`')) {
+          return <code key={pIdx} className="bg-slate-100 text-indigo-700 px-1 py-0.5 rounded font-mono text-[11px]">{part.slice(1, -1)}</code>;
         }
         return part;
       });
@@ -145,9 +279,31 @@ export default function AIChatWidget() {
 
   return (
     <div className="fixed bottom-6 right-6 z-[9990] flex flex-col items-end pointer-events-none">
+      {/* Input de Archivo Oculto */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+      />
+
       {/* Ventana de Chat */}
       {isOpen && (
-        <div className="pointer-events-auto mb-3 w-[360px] sm:w-[420px] h-[550px] max-h-[82vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+              setAttachedFile(e.dataTransfer.files[0]);
+            }
+          }}
+          className={`pointer-events-auto mb-3 w-[360px] sm:w-[430px] h-[560px] max-h-[84vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200 relative ${
+            isDragging ? 'ring-2 ring-indigo-500 bg-indigo-50/20' : ''
+          }`}
+        >
           {/* Header */}
           <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-4 text-white flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
@@ -159,7 +315,7 @@ export default function AIChatWidget() {
                   Asistente Fundamiga
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 </h3>
-                <p className="text-[11px] text-indigo-100">Cartas Word (.DOCX) y PDF Oficiales</p>
+                <p className="text-[11px] text-indigo-100">Consultas, subida de archivos y cartas</p>
               </div>
             </div>
 
@@ -207,12 +363,21 @@ export default function AIChatWidget() {
                 )}
 
                 <div
-                  className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                  className={`max-w-[86%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
                     msg.sender === 'user'
                       ? 'bg-indigo-600 text-white rounded-br-none'
                       : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
                   }`}
                 >
+                  {/* Badge de archivo adjunto en mensaje de usuario */}
+                  {msg.archivoAdjunto && (
+                    <div className="mb-2 p-1.5 bg-indigo-700/80 rounded-lg flex items-center gap-1.5 text-[11px] text-white">
+                      <FileText size={13} />
+                      <span className="truncate font-medium">{msg.archivoAdjunto.nombre}</span>
+                      <span className="text-[10px] opacity-75">({msg.archivoAdjunto.tamaño})</span>
+                    </div>
+                  )}
+
                   {renderFormattedText(msg.text)}
 
                   {/* Renderizar Botones de Acción si existen */}
@@ -221,6 +386,8 @@ export default function AIChatWidget() {
                       {msg.acciones.map((act, aIdx) => {
                         const isDocx = act.tipo === 'GENERAR_DOCX';
                         const isPdf = act.tipo === 'GENERAR_CERTIFICADO';
+                        const isUploadConfirm = act.tipo === 'CONFIRMAR_SUBIDA';
+                        const isViewDoc = act.tipo === 'VER_DOCUMENTO';
                         const keyId = isDocx ? `${act.expediente?.id}-docx` : `${act.expediente?.id}-pdf`;
                         const isGenerating = generatingId === keyId;
 
@@ -228,19 +395,27 @@ export default function AIChatWidget() {
                           <button
                             key={aIdx}
                             onClick={() => handleExecuteAction(act)}
-                            disabled={isGenerating}
+                            disabled={isGenerating || isUploading}
                             className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
-                              isDocx
+                              isUploadConfirm
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : isDocx
                                 ? 'bg-blue-600 hover:bg-blue-700 text-white'
                                 : isPdf
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                : isViewDoc
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                             }`}
                           >
                             {isGenerating ? (
                               <>
                                 <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                 Generando documento...
+                              </>
+                            ) : isUploadConfirm ? (
+                              <>
+                                <UploadCloud size={13} /> {act.label}
                               </>
                             ) : isDocx ? (
                               <>
@@ -291,8 +466,42 @@ export default function AIChatWidget() {
               </div>
             )}
 
+            {isUploading && (
+              <div className="flex gap-2.5 items-center text-indigo-600 text-xs">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 text-xs shadow-sm">
+                  <Bot size={15} />
+                </div>
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl px-4 py-2 flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  <span className="font-semibold">{uploadProgressText || 'Subiendo archivo a la nube...'}</span>
+                </div>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Badge de archivo adjunto seleccionado */}
+          {attachedFile && (
+            <div className="mx-3 mb-1 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between text-xs text-indigo-700 animate-in fade-in">
+              <div className="flex items-center gap-2 truncate">
+                <FileText size={14} className="text-indigo-600 flex-shrink-0" />
+                <span className="font-semibold truncate">{attachedFile.name}</span>
+                <span className="text-[10px] text-indigo-500">({(attachedFile.size / 1024).toFixed(0)} KB)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachedFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className="text-indigo-400 hover:text-indigo-700 p-0.5"
+                title="Quitar archivo adjunto"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
 
           {/* Formulario de Entrada */}
           <form
@@ -302,16 +511,30 @@ export default function AIChatWidget() {
             }}
             className="p-3 bg-white border-t border-slate-200 flex items-center gap-2"
           >
+            {/* Botón de Adjuntar Archivo */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
+                attachedFile
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
+              }`}
+              title="Adjuntar documento o archivo (PDF, Imagen, Word)"
+            >
+              <Paperclip size={17} />
+            </button>
+
             <input
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Escribe un nombre o 'Genera carta de recomendación'..."
+              placeholder={attachedFile ? 'Escribe: "Lleva esto a [Nombre]"...' : 'Escribe o adjunta un archivo con 📎...'}
               className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               type="submit"
-              disabled={!inputText.trim() || isTyping}
+              disabled={(!inputText.trim() && !attachedFile) || isTyping || isUploading}
               className="w-9 h-9 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl flex items-center justify-center shadow-sm transition-colors flex-shrink-0"
             >
               <Send size={15} />
@@ -339,7 +562,7 @@ export default function AIChatWidget() {
                 ¡Nuevo Asistente IA!
                 <span className="text-[10px] text-indigo-300 font-normal">✨ Clic aquí</span>
               </p>
-              <p className="text-[10px] text-slate-300 mt-0.5 leading-none">Consultas rápidas y cartas oficiales</p>
+              <p className="text-[10px] text-slate-300 mt-0.5 leading-none">Consultas, subida de archivos y cartas</p>
             </div>
             <button
               onClick={e => {
