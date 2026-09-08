@@ -2,10 +2,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, Paperclip, CheckCircle2, UploadCloud, AlertCircle } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, ChevronDown, Download, Eye, FileText, Paperclip, CheckCircle2, UploadCloud, AlertCircle, Users, Search } from 'lucide-react';
 import { processAIChatMessage, ChatMessage, ChatAction } from '@/lib/aiChatService';
 import { generarCartaRecomendacionPDF, generarCartaRecomendacionDOCX, descargarBlob } from '@/lib/documentGenerator';
 import { subirArchivoAExpediente } from '@/lib/chatDocumentUpload';
+import { buscarTrabajadoresGlobales, obtenerTrabajadoresUnificados, TrabajadorItem } from '@/lib/trabajadoresService';
 
 export default function AIChatWidget() {
   const router = useRouter();
@@ -28,6 +29,14 @@ export default function AIChatWidget() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+
+  // Estados para autocompletado y directorio de trabajadores
+  const [suggestions, setSuggestions] = useState<TrabajadorItem[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showDirectory, setShowDirectory] = useState(false);
+  const [directorySearch, setDirectorySearch] = useState('');
+  const [directoryList, setDirectoryList] = useState<TrabajadorItem[]>([]);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -64,6 +73,55 @@ export default function AIChatWidget() {
       setAttachedFile(e.target.files[0]);
     }
   };
+
+  // Autocompletado: busca trabajadores mientras se escribe
+  const handleInputChange = async (value: string) => {
+    setInputText(value);
+    if (value.length >= 2) {
+      const results = await buscarTrabajadoresGlobales(value, 6);
+      setSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  // Pegar contacto seleccionado en el input
+  const handleSelectContact = (t: TrabajadorItem) => {
+    const texto = attachedFile
+      ? `Lleva este archivo a ${t.nombre} (CC: ${t.cedula})`
+      : `Dame los datos de ${t.nombre} (CC: ${t.cedula})`;
+    setInputText(texto);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setShowDirectory(false);
+    setDirectorySearch('');
+  };
+
+  // Abrir directorio de trabajadores
+  const handleOpenDirectory = async () => {
+    const next = !showDirectory;
+    setShowDirectory(next);
+    if (next && directoryList.length === 0) {
+      setLoadingDirectory(true);
+      try {
+        const todos = await obtenerTrabajadoresUnificados();
+        setDirectoryList(todos);
+      } finally {
+        setLoadingDirectory(false);
+      }
+    }
+  };
+
+  // Filtrar directorio en tiempo real
+  const filteredDirectory = directorySearch.length >= 1
+    ? directoryList.filter(t => {
+        const q = directorySearch.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const name = t.nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return name.includes(q) || (t.cedula || '').includes(directorySearch);
+      }).slice(0, 8)
+    : directoryList.slice(0, 8);
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputText).trim();
@@ -504,44 +562,143 @@ export default function AIChatWidget() {
           )}
 
           {/* Formulario de Entrada */}
-          <form
-            onSubmit={e => {
-              e.preventDefault();
-              handleSendMessage();
-            }}
-            className="p-3 bg-white border-t border-slate-200 flex items-center gap-2"
-          >
-            {/* Botón de Adjuntar Archivo */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
-                attachedFile
-                  ? 'bg-indigo-100 text-indigo-700'
-                  : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
-              }`}
-              title="Adjuntar documento o archivo (PDF, Imagen, Word)"
-            >
-              <Paperclip size={17} />
-            </button>
+          <div className="relative">
+            {/* Autocompletado flotante */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                <div className="px-2.5 py-1.5 text-[10px] text-slate-400 font-medium border-b border-slate-100 bg-slate-50">
+                  👥 Sugerencias de trabajadores
+                </div>
+                {suggestions.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onMouseDown={() => handleSelectContact(t)}
+                    className="w-full text-left px-3 py-2 hover:bg-indigo-50 flex items-center gap-2.5 transition-colors border-b border-slate-50 last:border-0"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 text-indigo-700 text-[11px] font-bold">
+                      {t.nombre.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-slate-800 truncate">{t.nombre}</p>
+                      <p className="text-[10px] text-slate-400">CC: {t.cedula} {t.cargo ? `· ${t.cargo}` : ''}</p>
+                    </div>
+                    <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${t.origen === 'expediente' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>
+                      {t.origen === 'expediente' ? 'Exp.' : 'Global'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-            <input
-              type="text"
-              value={inputText}
-              onChange={e => setInputText(e.target.value)}
-              placeholder={attachedFile ? 'Escribe: "Lleva esto a [Nombre]"...' : 'Escribe o adjunta un archivo con 📎...'}
-              className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={(!inputText.trim() && !attachedFile) || isTyping || isUploading}
-              className="w-9 h-9 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl flex items-center justify-center shadow-sm transition-colors flex-shrink-0"
+            {/* Panel de Directorio de Trabajadores */}
+            {showDirectory && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col" style={{ maxHeight: 260 }}>
+                <div className="px-2.5 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                  <Search size={12} className="text-slate-400" />
+                  <input
+                    autoFocus
+                    type="text"
+                    value={directorySearch}
+                    onChange={e => setDirectorySearch(e.target.value)}
+                    placeholder="Buscar por nombre o cédula..."
+                    className="flex-1 text-xs outline-none bg-transparent text-slate-700 placeholder-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setShowDirectory(false); setDirectorySearch(''); }}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {loadingDirectory ? (
+                    <div className="text-center text-xs text-slate-400 py-4">Cargando trabajadores...</div>
+                  ) : filteredDirectory.length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-4">Sin resultados</div>
+                  ) : (
+                    filteredDirectory.map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleSelectContact(t)}
+                        className="w-full text-left px-3 py-2 hover:bg-indigo-50 flex items-center gap-2.5 transition-colors border-b border-slate-50 last:border-0"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 text-indigo-700 text-[11px] font-bold">
+                          {t.nombre.charAt(0)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-800 truncate">{t.nombre}</p>
+                          <p className="text-[10px] text-slate-400">CC: {t.cedula} {t.cargo ? `· ${t.cargo}` : ''}</p>
+                        </div>
+                        <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${t.origen === 'expediente' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>
+                          {t.origen === 'expediente' ? 'Exp.' : 'Global'}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                setShowSuggestions(false);
+                handleSendMessage();
+              }}
+              className="p-3 bg-white border-t border-slate-200 flex items-center gap-2"
             >
-              <Send size={15} />
-            </button>
-          </form>
+              {/* Botón de Adjuntar Archivo */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
+                  attachedFile
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
+                }`}
+                title="Adjuntar documento o archivo (PDF, Imagen, Word)"
+              >
+                <Paperclip size={17} />
+              </button>
+
+              {/* Botón Directorio de Trabajadores */}
+              <button
+                type="button"
+                onClick={handleOpenDirectory}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
+                  showDirectory
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
+                }`}
+                title="Buscar trabajador y pegarlo en el chat"
+              >
+                <Users size={16} />
+              </button>
+
+              <input
+                type="text"
+                value={inputText}
+                onChange={e => handleInputChange(e.target.value)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                placeholder={attachedFile ? 'Escribe: "Lleva esto a [Nombre]"...' : 'Escribe o adjunta un archivo con 📎...'}
+                className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={(!inputText.trim() && !attachedFile) || isTyping || isUploading}
+                className="w-9 h-9 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl flex items-center justify-center shadow-sm transition-colors flex-shrink-0"
+              >
+                <Send size={15} />
+              </button>
+            </form>
+          </div>
         </div>
       )}
+
 
       {/* Launcher & Speech Bubble */}
       <div className="flex items-center">
