@@ -68,6 +68,7 @@ export default function SignatureExtractorModal({
 
   // Filtros de firma
   const [filterMode, setFilterMode] = useState<'clean' | 'original'>('clean');
+  const [inkColor, setInkColor] = useState<'black' | 'blue' | 'original'>('black');
   const [threshold, setThreshold] = useState<number>(185); // 0-255 umbral para limpiar fondo
   const [transparentBg, setTransparentBg] = useState<boolean>(true);
 
@@ -279,7 +280,7 @@ export default function SignatureExtractorModal({
     }
 
     // ── Algoritmo de Limpieza Digital de Firma ──
-    // Elimina sombras del papel / sellos claros y deja el trazo de tinta oscuro nítido
+    // Elimina sombras del papel / sellos claros y deja el trazo de tinta nítido
     const data = imgData.data;
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
@@ -300,17 +301,36 @@ export default function SignatureExtractorModal({
           data[i + 3] = 255;
         }
       } else {
-        // Tinta oscura: oscurecer para contraste óptimo (azul oscuro elegante o negro)
-        const factor = Math.max(0, (gray / threshold));
-        data[i] = Math.round(15 * factor); // Tono pizarra oscuro
-        data[i + 1] = Math.round(23 * factor);
-        data[i + 2] = Math.round(42 * factor);
-        data[i + 3] = 255; // Opaco
+        // Tinta oscura detectada
+        // Factor de profundidad del trazo (0 cerca al umbral, 1 trazo sólido profundo)
+        const depth = Math.min(1, Math.max(0, (threshold - gray) / (threshold * 0.75)));
+        const alpha = transparentBg ? Math.min(255, Math.round(180 + 75 * depth)) : 255;
+
+        if (inkColor === 'black') {
+          // Negro profesional tipo sello oficial
+          data[i] = Math.round(15 * (1 - depth));
+          data[i + 1] = Math.round(23 * (1 - depth));
+          data[i + 2] = Math.round(42 * (1 - depth));
+          data[i + 3] = alpha;
+        } else if (inkColor === 'blue') {
+          // Azul bolígrafo clásico
+          data[i] = Math.round(20 + 9 * (1 - depth));
+          data[i + 1] = Math.round(65 + 15 * (1 - depth));
+          data[i + 2] = Math.round(195 + 25 * depth);
+          data[i + 3] = alpha;
+        } else {
+          // Color original pero con contraste reforzado y fondo limpio
+          const contrast = 1.35;
+          data[i] = Math.max(0, Math.min(255, Math.round((r - 128) * contrast + 128)));
+          data[i + 1] = Math.max(0, Math.min(255, Math.round((g - 128) * contrast + 128)));
+          data[i + 2] = Math.max(0, Math.min(255, Math.round((b - 128) * contrast + 128)));
+          data[i + 3] = alpha;
+        }
       }
     }
 
     previewCtx.putImageData(imgData, 0, 0);
-  }, [cropRect, filterMode, threshold, transparentBg]);
+  }, [cropRect, filterMode, threshold, transparentBg, inkColor]);
 
   // ── Subir archivo personalizado desde disco ──
   const handleCustomFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -612,22 +632,24 @@ export default function SignatureExtractorModal({
             <div className="space-y-5">
               {/* Sección Vista Previa */}
               <div>
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
-                  <ImageIcon size={13} className="text-emerald-400" />
-                  Vista Previa del Recorte
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <ImageIcon size={13} className="text-emerald-400" />
+                    Vista Previa del Recorte
+                  </p>
+                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                    {transparentBg ? 'Fondo Transparente' : 'Fondo Blanco'}
+                  </span>
+                </div>
                 
-                <div className={`w-full h-36 rounded-2xl border border-slate-700 flex items-center justify-center p-3 relative overflow-hidden transition-all ${
-                  transparentBg
-                    ? 'bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:12px_12px] bg-slate-950'
-                    : 'bg-white'
-                }`}>
+                {/* Contenedor con fondo blanco/ajedrezado claro para visualización de alta nitidez */}
+                <div className="w-full h-40 rounded-2xl border-2 border-slate-700 bg-white flex items-center justify-center p-4 relative overflow-hidden shadow-inner bg-[linear-gradient(45deg,#f1f5f9_25%,transparent_25%),linear-gradient(-45deg,#f1f5f9_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f1f5f9_75%),linear-gradient(-45deg,transparent_75%,#f1f5f9_75%)] bg-[size:16px_16px] bg-[position:0_0,0_8px,8px_-8px,-8px_0]">
                   <canvas
                     ref={previewCanvasRef}
                     className="max-w-full max-h-full object-contain rounded drop-shadow-md"
                   />
                   {(!cropRect || cropRect.w < 10) && (
-                    <p className="text-xs text-slate-500 text-center italic">
+                    <p className="text-xs text-slate-400 text-center font-medium italic">
                       Arrastra sobre el documento para recortar la firma
                     </p>
                   )}
@@ -645,36 +667,83 @@ export default function SignatureExtractorModal({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setFilterMode('clean')}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 cursor-pointer ${
                       filterMode === 'clean'
-                        ? 'bg-emerald-600 text-white shadow-md'
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/50'
                         : 'bg-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
                     <span>✨ Limpia / Digital</span>
-                    <span className="text-[9px] opacity-75 font-normal">Quita sombras</span>
+                    <span className="text-[9px] opacity-75 font-normal">Quita papel/sombras</span>
                   </button>
 
                   <button
                     onClick={() => setFilterMode('original')}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 cursor-pointer ${
                       filterMode === 'original'
-                        ? 'bg-emerald-600 text-white shadow-md'
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/50'
                         : 'bg-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
                     <span>📷 Original</span>
-                    <span className="text-[9px] opacity-75 font-normal">Tal cual</span>
+                    <span className="text-[9px] opacity-75 font-normal">Sin filtros</span>
                   </button>
                 </div>
 
-                {/* Ajustes avanzados si está en modo limpio */}
+                {/* Color de tinta (en modo limpio) */}
                 {filterMode === 'clean' && (
                   <div className="space-y-3 pt-2 border-t border-slate-700/50">
                     <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">
+                        Color de Tinta:
+                      </span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setInkColor('black')}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            inkColor === 'black'
+                              ? 'bg-slate-950 text-white ring-2 ring-emerald-400'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-black border border-slate-500" />
+                          <span>Negro</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setInkColor('blue')}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            inkColor === 'blue'
+                              ? 'bg-blue-900 text-white ring-2 ring-emerald-400'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                          <span>Azul</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setInkColor('original')}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            inkColor === 'original'
+                              ? 'bg-emerald-900 text-white ring-2 ring-emerald-400'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <span>🌈</span>
+                          <span>Original</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Sensibilidad / Umbral */}
+                    <div>
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-300 mb-1">
                         <span>Sensibilidad de tinta:</span>
-                        <span className="text-emerald-400">{threshold}</span>
+                        <span className="text-emerald-400 font-mono">{threshold}</span>
                       </div>
                       <input
                         type="range"
@@ -684,16 +753,20 @@ export default function SignatureExtractorModal({
                         onChange={e => setThreshold(Number(e.target.value))}
                         className="w-full accent-emerald-500 cursor-pointer"
                       />
+                      <div className="flex justify-between text-[9px] text-slate-500 font-medium mt-0.5">
+                        <span>Más limpio</span>
+                        <span>Más trazo</span>
+                      </div>
                     </div>
 
-                    <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 font-semibold">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 font-semibold pt-1">
                       <input
                         type="checkbox"
                         checked={transparentBg}
                         onChange={e => setTransparentBg(e.target.checked)}
                         className="rounded accent-emerald-500 w-4 h-4 cursor-pointer"
                       />
-                      <span>Fondo transparente (PNG)</span>
+                      <span>Fondo transparente (PNG para cartas)</span>
                     </label>
                   </div>
                 )}
