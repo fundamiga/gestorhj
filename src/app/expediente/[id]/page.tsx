@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { supabaseStorage, uploadToCorrectBucket, deleteFromCorrectBucket, sanitizeFilename } from '@/lib/supabaseStorage';
 import { Expediente, DocumentoExpediente, CARGOS, TIPOS_DOCUMENTO, DOCUMENTOS_ESENCIALES } from '@/types';
 import DocumentViewer from '@/components/DocumentViewer';
+import SignatureExtractorModal from '@/components/SignatureExtractorModal';
 import JSZip from 'jszip';
 
 const cargoColor: Record<string, string> = {
@@ -83,6 +84,17 @@ export default function ExpedienteDetallePage() {
   const [editandoDocId, setEditandoDocId] = useState<string | null>(null);
   const [notaEditando, setNotaEditando] = useState('');
   const [documentoParaVer, setDocumentoParaVer] = useState<DocumentoExpediente | null>(null);
+  const [mostrarExtractorFirma, setMostrarExtractorFirma] = useState(false);
+  const [extractorDocId, setExtractorDocId] = useState<string | null>(null);
+
+  const abrirExtractorFirma = (docId?: string) => {
+    setExtractorDocId(docId || null);
+    setMostrarExtractorFirma(true);
+  };
+
+  const onFirmaGuardada = (nuevaFirma: DocumentoExpediente) => {
+    setDocumentos(prev => [nuevaFirma, ...prev]);
+  };
 
   const cargar = useCallback(async () => {
     setLoading(true); setError(null);
@@ -537,9 +549,20 @@ export default function ExpedienteDetallePage() {
                 </p>
                 <div className="space-y-1.5">
                   {faltantes.map(d => (
-                    <div key={d} className="flex items-center gap-2">
-                      <span className="text-base">{tipoIcono[d] || '📎'}</span>
-                      <span className="text-xs text-slate-500 font-medium">{d}</span>
+                    <div key={d} className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base shrink-0">{tipoIcono[d] || '📎'}</span>
+                        <span className="text-xs text-slate-600 font-medium truncate">{d}</span>
+                      </div>
+                      {d === 'Firma' && (
+                        <button
+                          onClick={() => abrirExtractorFirma()}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-sm transition-all shrink-0 cursor-pointer"
+                          title="Extraer y recortar firma desde Cédula u Hoja de Vida"
+                        >
+                          ✍️ Extraer
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -609,11 +632,22 @@ export default function ExpedienteDetallePage() {
           <div className="lg:col-span-2 space-y-8">
             {/* Subir */}
             <div className="bg-white rounded-[2.5rem] border border-white shadow-[0_20px_50px_rgba(0,0,0,0.04)] p-8">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
-                  <Upload size={14} className="text-blue-600" />
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
+                    <Upload size={14} className="text-blue-600" />
+                  </div>
+                  <h3 className="font-black text-slate-800">Subir Documento</h3>
                 </div>
-                <h3 className="font-black text-slate-800">Subir Documento</h3>
+                <button
+                  type="button"
+                  onClick={() => abrirExtractorFirma()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-black transition-all cursor-pointer shadow-sm"
+                  title="Extraer y recortar firma desde Cédula u Hoja de Vida"
+                >
+                  <span>✍️</span>
+                  <span>Extraer Firma</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <div className="relative">
@@ -717,6 +751,15 @@ export default function ExpedienteDetallePage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            {(doc.tipo_documento === 'Cédula de Ciudadanía' || doc.tipo_documento === 'Hoja de Vida') && (
+                              <button 
+                                onClick={() => abrirExtractorFirma(doc.id)}
+                                className="p-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-all cursor-pointer" 
+                                title="Extraer y recortar firma de este documento"
+                              >
+                                ✍️
+                              </button>
+                            )}
                             <button 
                               onClick={() => setDocumentoParaVer(doc)}
                               className="p-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-100 transition-all" title="Ver">
@@ -758,6 +801,22 @@ export default function ExpedienteDetallePage() {
           nombreArchivo={documentoParaVer.nombre_archivo}
           tipoDocumento={documentoParaVer.tipo_documento}
           onClose={() => setDocumentoParaVer(null)}
+          onExtractSignature={() => {
+            const id = documentoParaVer.id;
+            setDocumentoParaVer(null);
+            abrirExtractorFirma(id);
+          }}
+        />
+      )}
+
+      {/* Extractor de firmas desde Cédula u Hoja de Vida */}
+      {mostrarExtractorFirma && expediente && (
+        <SignatureExtractorModal
+          expediente={expediente}
+          documentos={documentos}
+          initialDocId={extractorDocId}
+          onClose={() => setMostrarExtractorFirma(false)}
+          onSignatureSaved={onFirmaGuardada}
         />
       )}
     </div>

@@ -8,9 +8,10 @@ interface DocumentViewerProps {
   nombreArchivo: string;
   tipoDocumento: string;
   onClose: () => void;
+  onExtractSignature?: () => void;
 }
 
-export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onClose }: DocumentViewerProps) {
+export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onClose, onExtractSignature }: DocumentViewerProps) {
   const [iframeError, setIframeError] = useState(false);
 
   const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(url) || /\.(jpg|jpeg|png|webp|gif)$/i.test(nombreArchivo);
@@ -27,6 +28,8 @@ export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onCl
       };
     }
   };
+
+  const puedeExtraerFirma = onExtractSignature && (tipoDocumento === 'Cédula de Ciudadanía' || tipoDocumento === 'Hoja de Vida');
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
@@ -52,6 +55,16 @@ export default function DocumentViewer({ url, nombreArchivo, tipoDocumento, onCl
           </div>
           
           <div className="flex items-center gap-2">
+            {puedeExtraerFirma && (
+              <button
+                onClick={onExtractSignature}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 text-xs font-black transition-all cursor-pointer shadow-sm"
+                title="Abrir recortador de firma"
+              >
+                <span>✍️</span>
+                <span className="hidden sm:inline">Recortar Firma</span>
+              </button>
+            )}
             <button 
               onClick={handlePrint}
               className="hidden md:flex p-2.5 rounded-xl hover:bg-slate-100 text-slate-500 transition-all"

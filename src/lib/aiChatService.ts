@@ -53,8 +53,17 @@ export async function processAIChatMessage(
   const cleanMsg = message.trim();
   if (!cleanMsg && !attachedFile) return { text: 'Por favor escribe una consulta o adjunta un archivo.' };
 
-  // Si hay un archivo adjunto o la intención es subir/llevar un archivo
-  if (attachedFile || cleanMsg.toLowerCase().includes('lleva') || cleanMsg.toLowerCase().includes('sube') || cleanMsg.toLowerCase().includes('archivo')) {
+  const msgLower = cleanMsg.toLowerCase();
+
+  // Detectar intención de subir/llevar archivo:
+  // - Hay archivo adjunto
+  // - O el usuario usó un verbo de subida + menciona a alguien (con @ o nombre)
+  const verbosSubida = ['lleva', 'llevale', 'sube', 'subele', 'subelo', 'subir', 'cargar', 'carga', 'agregar', 'agrega', 'añadir', 'añade', 'guardar', 'guarda', 'archivo', 'documento'];
+  const tieneVerbSubida = verbosSubida.some(v => msgLower.includes(v));
+  const tieneCategoria = detectarCategoria(cleanMsg) !== null;
+  const tieneArchivoOVerb = attachedFile || tieneVerbSubida || (tieneCategoria && msgLower.includes('subir'));
+
+  if (tieneArchivoOVerb) {
     return await processFileUploadIntent(cleanMsg, attachedFile);
   }
 
@@ -94,38 +103,71 @@ async function processFileUploadIntent(
   const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const nombreArchivo = attachedFile ? attachedFile.name : 'este archivo';
 
-  // 1. Detectar si mencionó categoría en el texto
+  // 1. Detectar categoría en el texto o en el nombre del archivo
   const categoriaDetectada = detectarCategoria(q) || (attachedFile ? detectarCategoria(attachedFile.name) : null);
 
-  // 2. Extraer términos para buscar persona
-  const palabrasIgnoradas = new Set([
-    'lleva', 'llevale', 'sube', 'subelo', 'subele', 'guarda', 'guardalo', 'asigna', 'asignalo',
-    'este', 'esta', 'estos', 'archivo', 'documento', 'foto', 'pdf', 'a', 'donde', 'de', 'para',
-    'el', 'la', 'los', 'las', 'por', 'favor', 'como', 'su', 'cedula', 'hoja', 'vida', 'contrato',
-    'eps', 'arl', 'antecedentes', 'rut', 'firma', 'cuenta'
-  ]);
-
-  const tokens = q
-    .split(/\s+/)
-    .filter(palabra => palabra.length >= 2 && !palabrasIgnoradas.has(palabra));
-
+  // 2. Extraer nombre de persona: primero buscar @mención, luego tokens normales
   let personaEncontrada: Expediente | null = null;
 
-  if (tokens.length > 0) {
+  // 2a. Buscar @mención: @nombre o @nombre apellido (todo lo que sigue al @ hasta espacio o fin)
+  const atMentionMatch = query.match(/@([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\s*\(CC:|$)/i);
+  const atRawMatch = query.match(/@([^\s@(]+(?:\s+[^\s@(]+)*)/);
+
+  const atName = atMentionMatch ? atMentionMatch[1].trim() : (atRawMatch ? atRawMatch[1].trim() : null);
+
+  if (atName) {
+    // Buscar por @mención directamente
+    const atTokens = atName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(t => t.length >= 2);
     let queryAnd = supabase.from('expedientes').select('*');
-    for (const t of tokens) {
+    for (const t of atTokens) {
       queryAnd = queryAnd.ilike('nombre', `%${t}%`);
     }
-    const { data: resAnd } = await queryAnd.limit(1);
+    const { data: resAt } = await queryAnd.limit(1);
+    if (resAt && resAt.length > 0) personaEncontrada = resAt[0];
 
-    if (resAnd && resAnd.length > 0) {
-      personaEncontrada = resAnd[0];
-    } else {
-      // Intentar por cédula si hay números
-      const numMatch = q.match(/\d{5,}/);
-      if (numMatch) {
-        const { data: resCed } = await supabase.from('expedientes').select('*').ilike('cedula', `%${numMatch[0]}%`).limit(1);
+    // También buscar si atName tiene cédula
+    if (!personaEncontrada) {
+      const numAt = atName.match(/\d{5,}/);
+      if (numAt) {
+        const { data: resCed } = await supabase.from('expedientes').select('*').ilike('cedula', `%${numAt[0]}%`).limit(1);
         if (resCed && resCed.length > 0) personaEncontrada = resCed[0];
+      }
+    }
+  }
+
+  // 2b. Si no encontró por @, buscar por tokens normales (excluyendo verbos y palabras de categoría)
+  if (!personaEncontrada) {
+    const palabrasIgnoradas = new Set([
+      'lleva', 'llevale', 'sube', 'subelo', 'subele', 'subir', 'carga', 'cargar',
+      'guarda', 'guardalo', 'asigna', 'asignalo', 'agrega', 'agregar', 'aniade', 'anadir',
+      'este', 'esta', 'estos', 'archivo', 'documento', 'foto', 'pdf', 'a', 'donde', 'de', 'para',
+      'el', 'la', 'los', 'las', 'por', 'favor', 'como', 'su', 'al', 'del', 'con',
+      // palabras de categoría (para no confundirlas con nombres)
+      'cedula', 'hoja', 'vida', 'contrato', 'eps', 'arl', 'antecedentes',
+      'rut', 'firma', 'cuenta', 'ingreso', 'retiro', 'policia', 'contraloria',
+      'procuraduria', 'bancario', 'bancaria', 'certificado', 'afiliacion', 'solicitud'
+    ]);
+
+    const tokens = q
+      .split(/\s+/)
+      .filter(palabra => palabra.length >= 2 && !palabrasIgnoradas.has(palabra));
+
+    if (tokens.length > 0) {
+      let queryAnd = supabase.from('expedientes').select('*');
+      for (const t of tokens) {
+        queryAnd = queryAnd.ilike('nombre', `%${t}%`);
+      }
+      const { data: resAnd } = await queryAnd.limit(1);
+
+      if (resAnd && resAnd.length > 0) {
+        personaEncontrada = resAnd[0];
+      } else {
+        // Intentar por cédula si hay números
+        const numMatch = q.match(/\d{5,}/);
+        if (numMatch) {
+          const { data: resCed } = await supabase.from('expedientes').select('*').ilike('cedula', `%${numMatch[0]}%`).limit(1);
+          if (resCed && resCed.length > 0) personaEncontrada = resCed[0];
+        }
       }
     }
   }
@@ -134,12 +176,12 @@ async function processFileUploadIntent(
   if (personaEncontrada) {
     const p = personaEncontrada;
 
-    // Si ya detectó la categoría:
+    // Si ya detectó la categoría: ir directo a confirmar
     if (categoriaDetectada) {
       return {
         text: `📎 **Archivo**: \`${nombreArchivo}\`\n\n` +
-          `Identifiqué el expediente de **${p.nombre}** (CC: ${p.cedula}) y la categoría **${categoriaDetectada}**.\n\n` +
-          `¿Deseas confirmar la subida de este documento a su expediente?`,
+          `✅ Identifiqué:\n• **Persona**: ${p.nombre} (CC: ${p.cedula})\n• **Categoría**: ${categoriaDetectada}\n\n` +
+          `¿Deseas confirmar la subida?`,
         expedientesEncontrados: [p],
         acciones: [
           {
@@ -193,6 +235,7 @@ async function processFileUploadIntent(
       `Por favor escribe su **nombre** o **cédula** (ej: *"Súbelo a Diana Arias"* o *"Para Michael Guevara"*).`
   };
 }
+
 
 async function processSupabaseQuery(query: string): Promise<ChatResponse> {
   const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
