@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, Check, RefreshCw, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
-  Upload, Sparkles, Sliders, Image as ImageIcon, AlertCircle, FileText
+  Upload, Sparkles, Sliders, Image as ImageIcon, AlertCircle, FileText,
+  RotateCw, RotateCcw
 } from 'lucide-react';
 import { Expediente, DocumentoExpediente } from '@/types';
 import { uploadToCorrectBucket, sanitizeFilename } from '@/lib/supabaseStorage';
@@ -55,11 +56,14 @@ export default function SignatureExtractorModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [zoomScale, setZoomScale] = useState(1.2);
+  const [docRotation, setDocRotation] = useState<number>(0);
+  const [signatureRotation, setSignatureRotation] = useState<number>(0);
 
   // Canvas refs
   const containerRef = useRef<HTMLDivElement>(null);
   const sourceCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const loadedImageRef = useRef<HTMLImageElement | null>(null);
 
   // Recorte interactivo (coordenadas relativas al sourceCanvas)
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
@@ -142,7 +146,8 @@ export default function SignatureExtractorModal({
           });
 
           if (isCancelled) return;
-          renderImageToCanvas(img);
+          loadedImageRef.current = img;
+          renderImageToCanvas(img, docRotation);
         }
       } catch (err: any) {
         console.error('Error cargando documento:', err);
@@ -161,12 +166,15 @@ export default function SignatureExtractorModal({
     };
   }, [currentUrl, isPDF]);
 
-  // ── Renderizar página de PDF cuando cambia página o zoom ──
+  // ── Renderizar página de PDF cuando cambia página, zoom o rotación ──
   const renderPdfPage = useCallback(async () => {
     if (!pdfDocProxy || !sourceCanvasRef.current) return;
     try {
       const page = await pdfDocProxy.getPage(currentPage);
-      const viewport = page.getViewport({ scale: zoomScale });
+      const viewport = page.getViewport({
+        scale: zoomScale,
+        rotation: (page.rotate + docRotation) % 360,
+      });
       const canvas = sourceCanvasRef.current;
       canvas.width = viewport.width;
       canvas.height = viewport.height;
@@ -182,28 +190,49 @@ export default function SignatureExtractorModal({
     } catch (err) {
       console.error('Error al renderizar página PDF:', err);
     }
-  }, [pdfDocProxy, currentPage, zoomScale]);
+  }, [pdfDocProxy, currentPage, zoomScale, docRotation]);
 
   useEffect(() => {
     if (pdfDocProxy) {
       renderPdfPage();
     }
-  }, [pdfDocProxy, currentPage, zoomScale, renderPdfPage]);
+  }, [pdfDocProxy, currentPage, zoomScale, docRotation, renderPdfPage]);
 
-  // ── Renderizar Imagen en Canvas ──
-  const renderImageToCanvas = (img: HTMLImageElement) => {
+  // ── Renderizar Imagen en Canvas con rotación ──
+  const renderImageToCanvas = useCallback((img: HTMLImageElement, rotation: number = 0) => {
     const canvas = sourceCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
-    canvas.width = img.naturalWidth || img.width;
-    canvas.height = img.naturalHeight || img.height;
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const rot = (rotation % 360 + 360) % 360;
+
+    if (rot === 90 || rot === 270) {
+      canvas.width = h;
+      canvas.height = w;
+    } else {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((rot * Math.PI) / 180);
+    ctx.drawImage(img, -w / 2, -h / 2);
+    ctx.restore();
 
     initDefaultCrop(canvas.width, canvas.height);
-  };
+  }, []);
+
+  // Re-renderizar imagen si cambia la rotación del documento
+  useEffect(() => {
+    if (!isPDF && loadedImageRef.current) {
+      renderImageToCanvas(loadedImageRef.current, docRotation);
+    }
+  }, [docRotation, isPDF, renderImageToCanvas]);
 
   // Sugerir un área inicial donde típicamente está la firma (tercio inferior central)
   const initDefaultCrop = (w: number, h: number) => {
@@ -346,13 +375,38 @@ export default function SignatureExtractorModal({
         previewCtx.putImageData(imgData, 0, 0);
       }
 
+      // Si la firma tiene rotación (90°, 180°, 270°)
+      if (signatureRotation !== 0) {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = previewCanvas.width;
+        tempCanvas.height = previewCanvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          tempCtx.drawImage(previewCanvas, 0, 0);
+
+          const rot = (signatureRotation % 360 + 360) % 360;
+          const rad = (rot * Math.PI) / 180;
+          const isSwapped = rot === 90 || rot === 270;
+
+          previewCanvas.width = isSwapped ? tempCanvas.height : tempCanvas.width;
+          previewCanvas.height = isSwapped ? tempCanvas.width : tempCanvas.height;
+
+          previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+          previewCtx.save();
+          previewCtx.translate(previewCanvas.width / 2, previewCanvas.height / 2);
+          previewCtx.rotate(rad);
+          previewCtx.drawImage(tempCanvas, -tempCanvas.width / 2, -tempCanvas.height / 2);
+          previewCtx.restore();
+        }
+      }
+
       // Convertir a DataURL para renderizar en <img> con visibilidad garantizada al 100%
       const dataUrl = previewCanvas.toDataURL('image/png');
       setPreviewDataUrl(dataUrl);
     } catch (err) {
       console.error('Error procesando vista previa de firma:', err);
     }
-  }, [cropRect, filterMode, threshold, transparentBg, inkColor]);
+  }, [cropRect, filterMode, threshold, transparentBg, inkColor, signatureRotation]);
 
   // ── Subir archivo personalizado desde disco ──
   const handleCustomFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -552,24 +606,46 @@ export default function SignatureExtractorModal({
             </div>
           )}
 
-          {/* Zoom */}
-          <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-xl border border-slate-700 text-xs">
+          {/* Controles de Vista: Zoom y Rotación de Documento */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Zoom */}
+            <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-xl border border-slate-700 text-xs">
+              <button
+                onClick={() => setZoomScale(s => Math.max(0.7, s - 0.2))}
+                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                title="Alejar"
+              >
+                <ZoomOut size={15} />
+              </button>
+              <span className="text-[11px] font-bold text-slate-300 w-12 text-center">
+                {Math.round(zoomScale * 100)}%
+              </span>
+              <button
+                onClick={() => setZoomScale(s => Math.min(2.5, s + 0.2))}
+                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                title="Acercar"
+              >
+                <ZoomIn size={15} />
+              </button>
+            </div>
+
+            {/* Rotar Documento 90° */}
             <button
-              onClick={() => setZoomScale(s => Math.max(0.7, s - 0.2))}
-              className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
-              title="Alejar"
+              type="button"
+              onClick={() => {
+                setDocRotation(r => (r + 90) % 360);
+                setCropRect(null); // Reiniciar selección al rotar el documento
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-700 text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Girar documento 90° a la derecha"
             >
-              <ZoomOut size={15} />
-            </button>
-            <span className="text-[11px] font-bold text-slate-300 w-12 text-center">
-              {Math.round(zoomScale * 100)}%
-            </span>
-            <button
-              onClick={() => setZoomScale(s => Math.min(2.5, s + 0.2))}
-              className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
-              title="Acercar"
-            >
-              <ZoomIn size={15} />
+              <RotateCw size={13} className="text-emerald-400" />
+              <span>Girar Doc</span>
+              {docRotation !== 0 && (
+                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded font-mono">
+                  {docRotation}°
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -657,11 +733,33 @@ export default function SignatureExtractorModal({
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                     <ImageIcon size={13} className="text-emerald-400" />
-                    Vista Previa del Recorte
+                    Vista Previa
                   </p>
-                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                    {transparentBg ? 'Fondo Transparente' : 'Fondo Blanco'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {/* Botones rotar firma 90° */}
+                    <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5" title="Girar firma">
+                      <button
+                        type="button"
+                        onClick={() => setSignatureRotation(r => (r + 270) % 360)}
+                        className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
+                        title="Girar firma 90° antihorario"
+                      >
+                        <RotateCcw size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSignatureRotation(r => (r + 90) % 360)}
+                        className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
+                        title="Girar firma 90° horario"
+                      >
+                        <RotateCw size={12} />
+                      </button>
+                    </div>
+
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                      {signatureRotation !== 0 ? `${signatureRotation}°` : transparentBg ? 'PNG Transp.' : 'Blanco'}
+                    </span>
+                  </div>
                 </div>
                 
                 {/* Contenedor con fondo blanco/ajedrezado claro para visualización de alta nitidez */}
