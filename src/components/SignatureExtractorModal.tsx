@@ -71,6 +71,7 @@ export default function SignatureExtractorModal({
   const [inkColor, setInkColor] = useState<'black' | 'blue' | 'original'>('black');
   const [threshold, setThreshold] = useState<number>(185); // 0-255 umbral para limpiar fondo
   const [transparentBg, setTransparentBg] = useState<boolean>(true);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
 
   // Estado de guardado
   const [saving, setSaving] = useState(false);
@@ -259,7 +260,10 @@ export default function SignatureExtractorModal({
 
   // ── Actualizar vista previa del recorte y aplicar filtro de limpieza ──
   useEffect(() => {
-    if (!cropRect || cropRect.w < 10 || cropRect.h < 10) return;
+    if (!cropRect || cropRect.w < 10 || cropRect.h < 10) {
+      setPreviewDataUrl(null);
+      return;
+    }
     const sourceCanvas = sourceCanvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     if (!sourceCanvas || !previewCanvas) return;
@@ -268,68 +272,86 @@ export default function SignatureExtractorModal({
     const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
     if (!sourceCtx || !previewCtx) return;
 
-    previewCanvas.width = cropRect.w;
-    previewCanvas.height = cropRect.h;
+    // Límites estrictos y enteros
+    const sx = Math.max(0, Math.floor(cropRect.x));
+    const sy = Math.max(0, Math.floor(cropRect.y));
+    const sw = Math.min(sourceCanvas.width - sx, Math.floor(cropRect.w));
+    const sh = Math.min(sourceCanvas.height - sy, Math.floor(cropRect.h));
 
-    // Obtener píxeles del recorte original
-    const imgData = sourceCtx.getImageData(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-
-    if (filterMode === 'original') {
-      previewCtx.putImageData(imgData, 0, 0);
+    if (sw < 5 || sh < 5) {
+      setPreviewDataUrl(null);
       return;
     }
 
-    // ── Algoritmo de Limpieza Digital de Firma ──
-    // Elimina sombras del papel / sellos claros y deja el trazo de tinta nítido
-    const data = imgData.data;
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+    try {
+      previewCanvas.width = sw;
+      previewCanvas.height = sh;
 
-      // Luminancia percibida
-      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      // Obtener píxeles del recorte original
+      const imgData = sourceCtx.getImageData(sx, sy, sw, sh);
 
-      if (gray > threshold) {
-        // Fondo claro: volver transparente o blanco
-        if (transparentBg) {
-          data[i + 3] = 0; // Transparente
-        } else {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-          data[i + 3] = 255;
-        }
+      if (filterMode === 'original') {
+        previewCtx.putImageData(imgData, 0, 0);
       } else {
-        // Tinta oscura detectada
-        // Factor de profundidad del trazo (0 cerca al umbral, 1 trazo sólido profundo)
-        const depth = Math.min(1, Math.max(0, (threshold - gray) / (threshold * 0.75)));
-        const alpha = transparentBg ? Math.min(255, Math.round(180 + 75 * depth)) : 255;
+        // ── Algoritmo de Limpieza Digital de Firma ──
+        // Elimina sombras del papel / sellos claros y deja el trazo de tinta nítido
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
 
-        if (inkColor === 'black') {
-          // Negro profesional tipo sello oficial
-          data[i] = Math.round(15 * (1 - depth));
-          data[i + 1] = Math.round(23 * (1 - depth));
-          data[i + 2] = Math.round(42 * (1 - depth));
-          data[i + 3] = alpha;
-        } else if (inkColor === 'blue') {
-          // Azul bolígrafo clásico
-          data[i] = Math.round(20 + 9 * (1 - depth));
-          data[i + 1] = Math.round(65 + 15 * (1 - depth));
-          data[i + 2] = Math.round(195 + 25 * depth);
-          data[i + 3] = alpha;
-        } else {
-          // Color original pero con contraste reforzado y fondo limpio
-          const contrast = 1.35;
-          data[i] = Math.max(0, Math.min(255, Math.round((r - 128) * contrast + 128)));
-          data[i + 1] = Math.max(0, Math.min(255, Math.round((g - 128) * contrast + 128)));
-          data[i + 2] = Math.max(0, Math.min(255, Math.round((b - 128) * contrast + 128)));
-          data[i + 3] = alpha;
+          // Luminancia percibida
+          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+          if (gray > threshold) {
+            // Fondo claro: volver transparente o blanco
+            if (transparentBg) {
+              data[i + 3] = 0; // Transparente
+            } else {
+              data[i] = 255;
+              data[i + 1] = 255;
+              data[i + 2] = 255;
+              data[i + 3] = 255;
+            }
+          } else {
+            // Tinta oscura detectada
+            // Factor de profundidad del trazo (0 cerca al umbral, 1 trazo sólido profundo)
+            const depth = Math.min(1, Math.max(0, (threshold - gray) / (threshold * 0.75)));
+            const alpha = transparentBg ? Math.min(255, Math.round(180 + 75 * depth)) : 255;
+
+            if (inkColor === 'black') {
+              // Negro profesional tipo sello oficial
+              data[i] = Math.round(15 * (1 - depth));
+              data[i + 1] = Math.round(23 * (1 - depth));
+              data[i + 2] = Math.round(42 * (1 - depth));
+              data[i + 3] = alpha;
+            } else if (inkColor === 'blue') {
+              // Azul bolígrafo clásico
+              data[i] = Math.round(20 + 9 * (1 - depth));
+              data[i + 1] = Math.round(65 + 15 * (1 - depth));
+              data[i + 2] = Math.round(195 + 25 * depth);
+              data[i + 3] = alpha;
+            } else {
+              // Color original pero con contraste reforzado y fondo limpio
+              const contrast = 1.35;
+              data[i] = Math.max(0, Math.min(255, Math.round((r - 128) * contrast + 128)));
+              data[i + 1] = Math.max(0, Math.min(255, Math.round((g - 128) * contrast + 128)));
+              data[i + 2] = Math.max(0, Math.min(255, Math.round((b - 128) * contrast + 128)));
+              data[i + 3] = alpha;
+            }
+          }
         }
-      }
-    }
 
-    previewCtx.putImageData(imgData, 0, 0);
+        previewCtx.putImageData(imgData, 0, 0);
+      }
+
+      // Convertir a DataURL para renderizar en <img> con visibilidad garantizada al 100%
+      const dataUrl = previewCanvas.toDataURL('image/png');
+      setPreviewDataUrl(dataUrl);
+    } catch (err) {
+      console.error('Error procesando vista previa de firma:', err);
+    }
   }, [cropRect, filterMode, threshold, transparentBg, inkColor]);
 
   // ── Subir archivo personalizado desde disco ──
@@ -643,16 +665,31 @@ export default function SignatureExtractorModal({
                 </div>
                 
                 {/* Contenedor con fondo blanco/ajedrezado claro para visualización de alta nitidez */}
-                <div className="w-full h-40 rounded-2xl border-2 border-slate-700 bg-white flex items-center justify-center p-4 relative overflow-hidden shadow-inner bg-[linear-gradient(45deg,#f1f5f9_25%,transparent_25%),linear-gradient(-45deg,#f1f5f9_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f1f5f9_75%),linear-gradient(-45deg,transparent_75%,#f1f5f9_75%)] bg-[size:16px_16px] bg-[position:0_0,0_8px,8px_-8px,-8px_0]">
-                  <canvas
-                    ref={previewCanvasRef}
-                    className="max-w-full max-h-full object-contain rounded drop-shadow-md"
-                  />
-                  {(!cropRect || cropRect.w < 10) && (
-                    <p className="text-xs text-slate-400 text-center font-medium italic">
-                      Arrastra sobre el documento para recortar la firma
-                    </p>
+                <div className="w-full h-44 rounded-2xl border-2 border-slate-700 bg-white flex items-center justify-center p-3 relative overflow-hidden shadow-inner bg-[linear-gradient(45deg,#f1f5f9_25%,transparent_25%),linear-gradient(-45deg,#f1f5f9_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f1f5f9_75%),linear-gradient(-45deg,transparent_75%,#f1f5f9_75%)] bg-[size:16px_16px] bg-[position:0_0,0_8px,8px_-8px,-8px_0]">
+                  {previewDataUrl ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 p-2 animate-in fade-in zoom-in-95 duration-150">
+                      <img
+                        src={previewDataUrl}
+                        alt="Vista previa de la firma"
+                        className="max-w-[95%] max-h-28 object-contain drop-shadow select-none"
+                      />
+                      <span className="text-[10px] text-slate-600 font-bold bg-white/95 px-2.5 py-0.5 rounded-full border border-slate-200 shadow-sm">
+                        {filterMode === 'clean' ? '✨ Tinta Digital' : '📷 Foto Original'} ({cropRect?.w ? Math.round(cropRect.w) : 0}×{cropRect?.h ? Math.round(cropRect.h) : 0}px)
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-center p-3">
+                      <p className="text-xs text-slate-500 font-bold mb-1">
+                        Sin firma seleccionada
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        Arrastra con el ratón sobre la firma en el documento para ver cómo queda
+                      </p>
+                    </div>
                   )}
+
+                  {/* Canvas oculto para cálculos y exportación */}
+                  <canvas ref={previewCanvasRef} className="hidden" />
                 </div>
               </div>
 
@@ -742,9 +779,41 @@ export default function SignatureExtractorModal({
                     {/* Sensibilidad / Umbral */}
                     <div>
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-300 mb-1">
-                        <span>Sensibilidad de tinta:</span>
+                        <span>Limpieza de fondo:</span>
                         <span className="text-emerald-400 font-mono">{threshold}</span>
                       </div>
+
+                      {/* Botones de preset rápido */}
+                      <div className="flex gap-1 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setThreshold(160)}
+                          className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+                            threshold === 160 ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          Fuerte
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setThreshold(185)}
+                          className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+                            threshold === 185 ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          Óptimo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setThreshold(215)}
+                          className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+                            threshold === 215 ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          Suave
+                        </button>
+                      </div>
+
                       <input
                         type="range"
                         min="100"
